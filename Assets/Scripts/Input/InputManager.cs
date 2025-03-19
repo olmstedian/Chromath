@@ -31,7 +31,6 @@ public class InputManager : MonoBehaviour
         selectedTile = tile;
         touchStartPos = Mouse.current.position.ReadValue();
         isTrackingSwipe = true;
-        Debug.Log($"InputManager: Tracking swipe for {tile.name} from {touchStartPos}");
     }
     
     private void HandleSwipeTracking()
@@ -42,16 +41,10 @@ public class InputManager : MonoBehaviour
             Vector2 touchEndPos = Mouse.current.position.ReadValue();
             Vector2 swipeDelta = touchEndPos - touchStartPos;
             
-            Debug.Log($"Swipe detected: {swipeDelta}, Magnitude: {swipeDelta.magnitude}");
-            
             // Process the swipe if it meets minimum distance
             if (swipeDelta.magnitude >= minSwipeDistance)
             {
                 ProcessSwipe(swipeDelta);
-            }
-            else
-            {
-                Debug.Log("Swipe too short, ignoring");
             }
             
             // Reset tracking
@@ -76,19 +69,17 @@ public class InputManager : MonoBehaviour
         float x = Mathf.Abs(swipeDelta.x);
         float y = Mathf.Abs(swipeDelta.y);
         
-        Debug.Log($"Processing swipe: {swipeDelta}, Magnitude: {swipeDelta.magnitude}");
-        
         if (x > y)
         {
             // Horizontal swipe
             if (swipeDelta.x > 0)
             {
-                Debug.Log("RIGHT swipe");
+                Debug.Log("RIGHT swipe detected");
                 tileMovement.MoveRight(moveDistance);
             }
             else
             {
-                Debug.Log("LEFT swipe");
+                Debug.Log("LEFT swipe detected");
                 tileMovement.MoveLeft(moveDistance);
             }
         }
@@ -97,12 +88,12 @@ public class InputManager : MonoBehaviour
             // Vertical swipe
             if (swipeDelta.y > 0)
             {
-                Debug.Log("UP swipe");
+                Debug.Log("UP swipe detected");
                 tileMovement.MoveUp(moveDistance);
             }
             else
             {
-                Debug.Log("DOWN swipe");
+                Debug.Log("DOWN swipe detected");
                 tileMovement.MoveDown(moveDistance);
             }
         }

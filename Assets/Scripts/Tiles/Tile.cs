@@ -5,6 +5,9 @@ public class Tile : MonoBehaviour
     // Property to store the tile's type or state
     public string TileType { get; set; }
 
+    // Flag to determine if this tile can be moved/interacted with
+    private bool isMovable = false;
+
     // Reference to the SpriteRenderer component
     private SpriteRenderer spriteRenderer;
 
@@ -115,6 +118,12 @@ public class Tile : MonoBehaviour
     // Method to handle mouse input for macOS
     private void OnMouseDown()
     {
+        // Only handle input if the tile is movable
+        if (!isMovable)
+        {
+            return;
+        }
+
         Debug.Log($"Tile clicked: {TileType}");
 
         // Try to find InputManager again if it's null
@@ -135,5 +144,27 @@ public class Tile : MonoBehaviour
         }
 
         OnTileClicked();
+    }
+
+    // Method to set whether this tile can be moved
+    public void SetMovable(bool movable)
+    {
+        isMovable = movable;
+
+        // If the tile is not movable, we might want to disable its collider
+        if (!movable && boxCollider != null)
+        {
+            boxCollider.enabled = false;
+        }
+        else if (movable && boxCollider != null)
+        {
+            boxCollider.enabled = true;
+        }
+    }
+
+    // Method to check if this tile is movable
+    public bool IsMovable()
+    {
+        return isMovable;
     }
 }

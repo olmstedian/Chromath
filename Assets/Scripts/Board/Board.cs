@@ -21,6 +21,28 @@ public class Board : MonoBehaviour
     {
         // Set the actual spacing that will be used for movement calculations
         actualTileSpacing = tileSpacing;
+        
+        // Clamp the values to ensure valid dimensions
+        rows = Mathf.Clamp(rows, 2, 10);
+        columns = Mathf.Clamp(columns, 2, 10);
+        
+        GenerateBoard();
+    }
+
+    // A method to rebuild the board with new dimensions
+    public void RebuildBoard(int newRows, int newColumns)
+    {
+        // Clean up existing children
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Destroy(transform.GetChild(i).gameObject);
+        }
+        
+        // Set new dimensions
+        rows = Mathf.Clamp(newRows, 2, 10);
+        columns = Mathf.Clamp(newColumns, 2, 10);
+        
+        // Rebuild the board
         GenerateBoard();
     }
 
@@ -53,16 +75,35 @@ public class Board : MonoBehaviour
                 if (tileScript != null)
                 {
                     tileScript.Initialize($"Tile ({row}, {col})");
-
+                    tileScript.SetMovable(false); // Set board tiles as non-movable
+                    
                     // Alternate tile colors for a chessboard pattern
                     Color tileColor = (row + col) % 2 == 0 ? color1 : color2;
                     tileScript.GetComponent<SpriteRenderer>().color = tileColor;
+                    
+                    // Remove or disable any BoxCollider2D to prevent interaction
+                    BoxCollider2D collider = tileScript.GetComponent<BoxCollider2D>();
+                    if (collider != null)
+                    {
+                        collider.enabled = false;
+                    }
+                    
+                    // Remove TileMovement component if it exists
+                    TileMovement movement = tileScript.GetComponent<TileMovement>();
+                    if (movement != null)
+                    {
+                        Destroy(movement);
+                    }
                 }
                 
                 // Set regular tile size
                 regularTile.transform.localScale = new Vector3(tileSize, tileSize, 1f);
 
-                // For position (0,0), also add a GameTile on top
+                // Remove the automatic GameTile creation at (0,0) since we'll now
+                // let the TileManager handle this properly with GenerateInitialTiles
+                // This prevents duplicate tiles at the same location
+                
+                /* Remove this section:
                 if (row == 0 && col == 0 && gameTilePrefab != null)
                 {
                     // Position slightly in front of the regular tile
@@ -76,6 +117,13 @@ public class Board : MonoBehaviour
                     if (gameTileScript != null)
                     {
                         gameTileScript.Initialize(GameTile.TileColor.Red);
+                        
+                        // Make sure the Tile component of the GameTile is set to movable
+                        Tile gameTileComponent = gameTileObject.GetComponent<Tile>();
+                        if (gameTileComponent != null)
+                        {
+                            gameTileComponent.SetMovable(true);
+                        }
                     }
                     
                     // Ensure GameTile is rendered on top of regular tiles
@@ -88,7 +136,24 @@ public class Board : MonoBehaviour
                     // Set game tile size
                     gameTileObject.transform.localScale = new Vector3(tileSize, tileSize, 1f);
                 }
+                */
             }
         }
+    }
+
+    // Add this method to help TileManager get world positions
+    public Vector3 GetWorldPosition(Vector2Int gridPosition)
+    {
+        float boardWidth = (columns - 1) * tileSpacing;
+        float boardHeight = (rows - 1) * tileSpacing;
+        
+        float startX = -boardWidth / 2;
+        float startY = -boardHeight / 2;
+        
+        return new Vector3(
+            startX + (gridPosition.x * tileSpacing), 
+            startY + (gridPosition.y * tileSpacing), 
+            0
+        );
     }
 }

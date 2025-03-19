@@ -3,8 +3,9 @@ using UnityEngine;
 
 public class TileMovement : MonoBehaviour
 {
-    [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float moveTime = 0.2f;
+    
+    // Removed unused moveSpeed field
     
     private bool isMoving = false;
     private Vector3 targetPosition;
@@ -22,7 +23,6 @@ public class TileMovement : MonoBehaviour
     {
         if (isMoving)
         {
-            Debug.Log("Cannot move - already moving");
             return false;
         }
         
@@ -36,9 +36,31 @@ public class TileMovement : MonoBehaviour
         // Calculate the target position
         Vector3 desiredPosition = transform.position + new Vector3(direction.x, direction.y, 0) * tileSpacing;
         
-        Debug.Log($"Attempting to move from {transform.position} to {desiredPosition}");
+        // Keep this log for tracking tile movement
+        Debug.Log($"Moving tile from {transform.position} to {desiredPosition}");
         
-        // Always allow the move for now (debugging)
+        // Check for tile merging along the path
+        if (gameTileComponent != null)
+        {
+            // Get the current grid position
+            TileManager tileManager = TileManager.Instance;
+            if (tileManager != null)
+            {
+                Vector2Int? currentPos = tileManager.GetTilePosition(gameObject);
+                if (currentPos.HasValue)
+                {
+                    // Calculate the target grid position
+                    Vector2Int targetPos = currentPos.Value + new Vector2Int(Mathf.RoundToInt(direction.x), Mathf.RoundToInt(direction.y));
+                    
+                    // Try to move or merge with the tile at the target position
+                    bool moveSucceeded = tileManager.MoveTile(gameObject, targetPos);
+                    
+                    return moveSucceeded;
+                }
+            }
+        }
+        
+        // Fallback if no tile manager or position is available
         StartCoroutine(MoveToPosition(desiredPosition));
         return true;
     }
@@ -60,7 +82,8 @@ public class TileMovement : MonoBehaviour
     // Smoothly move the tile to the target position
     private IEnumerator MoveToPosition(Vector3 position)
     {
-        Debug.Log($"Starting movement from {transform.position} to {position}");
+        // Keep start movement log
+        Debug.Log($"Starting tile movement from {transform.position} to {position}");
         isMoving = true;
         targetPosition = position;
         
@@ -78,14 +101,21 @@ public class TileMovement : MonoBehaviour
             float t = elapsedTime / moveTime;
             transform.position = Vector3.Lerp(startPosition, targetPosition, t);
             elapsedTime += Time.deltaTime;
-            Debug.Log($"Moving: t={t}, pos={transform.position}");
+            // Remove verbose intermediate movement logs
             yield return null;
         }
         
         // Ensure the tile ends up exactly at the target position
         transform.position = targetPosition;
-        Debug.Log($"Movement complete: pos={transform.position}");
+        // Keep movement completion log
+        Debug.Log($"Completed tile movement to {transform.position}");
         isMoving = false;
+        
+        // REMOVE this notification since it's now handled by TileManager
+        // if (GameManager.Instance != null)
+        // {
+        //     GameManager.Instance.OnTileMovementComplete();
+        // }
     }
     
     // Public property to check if the tile is currently moving
