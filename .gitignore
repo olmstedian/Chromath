@@ -7,6 +7,7 @@
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 /.vs/
+/Assets/Sprites/
 .DS_Store
 .consulo/
 *.csproj
@@ -26,3 +27,4 @@
 *.pidb.meta
 *.pdb.meta
 *.mdb.meta
+
