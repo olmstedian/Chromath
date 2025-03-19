@@ -31,6 +31,18 @@ public class GameTile : MonoBehaviour
         {
             Debug.LogError("GameTile requires a Tile component");
         }
+        
+        // Ensure this tile is rendered above regular tiles
+        SpriteRenderer renderer = GetComponent<SpriteRenderer>();
+        if (renderer != null)
+        {
+            // Set a higher sorting order to render on top of other tiles
+            renderer.sortingOrder = 10;
+            
+            // Alternatively, adjust the Z position slightly forward
+            Vector3 pos = transform.position;
+            transform.position = new Vector3(pos.x, pos.y, -0.1f);
+        }
     }
     
     // Initialize the game tile with a specific color

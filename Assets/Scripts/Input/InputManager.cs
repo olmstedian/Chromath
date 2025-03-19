@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.InputSystem; // Add this for new Input System
+using UnityEngine.InputSystem;
 
 public class InputManager : MonoBehaviour
 {
@@ -10,74 +10,100 @@ public class InputManager : MonoBehaviour
     [SerializeField] private GameObject testTile;
     
     private Vector2 touchStartPos;
-    private Vector2 touchEndPos;
-    private bool isTouching = false;
+    private bool isTrackingSwipe = false;
     private GameObject selectedTile = null;
     
     private void Update()
     {
-        // Handle input for both mobile and desktop
-        HandleInput();
+        // Only handle swipe tracking if we have a selected tile
+        if (selectedTile != null && isTrackingSwipe)
+        {
+            HandleSwipeTracking();
+        }
         
         // Direct testing controls
         TestDirectMovement();
     }
     
-    private void HandleInput()
+    // Called directly from Tile.OnMouseDown
+    public void SetSelectedTile(GameObject tile)
     {
-        // Desktop mouse input
-        if (Input.GetMouseButtonDown(0))
+        selectedTile = tile;
+        touchStartPos = Mouse.current.position.ReadValue();
+        isTrackingSwipe = true;
+        Debug.Log($"InputManager: Tracking swipe for {tile.name} from {touchStartPos}");
+    }
+    
+    private void HandleSwipeTracking()
+    {
+        // Check if the mouse button is released
+        if (!Mouse.current.leftButton.isPressed)
         {
-            touchStartPos = Input.mousePosition;
-            isTouching = true;
+            Vector2 touchEndPos = Mouse.current.position.ReadValue();
+            Vector2 swipeDelta = touchEndPos - touchStartPos;
             
-            // Cast a ray to find the selected tile
-            selectedTile = GetTileAtPosition(touchStartPos);
-            if (selectedTile != null)
+            Debug.Log($"Swipe detected: {swipeDelta}, Magnitude: {swipeDelta.magnitude}");
+            
+            // Process the swipe if it meets minimum distance
+            if (swipeDelta.magnitude >= minSwipeDistance)
             {
-                Debug.Log($"Selected tile: {selectedTile.name}");
+                ProcessSwipe(swipeDelta);
             }
-        }
-        else if (Input.GetMouseButtonUp(0) && isTouching)
-        {
-            touchEndPos = Input.mousePosition;
-            isTouching = false;
-            
-            // Process the swipe only if we have a selected tile
-            if (selectedTile != null)
+            else
             {
-                Debug.Log($"Processing swipe for tile: {selectedTile.name}");
-                ProcessSwipe();
+                Debug.Log("Swipe too short, ignoring");
             }
             
+            // Reset tracking
+            isTrackingSwipe = false;
             selectedTile = null;
         }
-        
-        // Mobile touch input
-        if (Input.touchCount > 0)
+    }
+    
+    private void ProcessSwipe(Vector2 swipeDelta)
+    {
+        TileMovement tileMovement = selectedTile.GetComponent<TileMovement>();
+        if (tileMovement == null)
         {
-            Touch touch = Input.GetTouch(0);
-            
-            if (touch.phase == UnityEngine.TouchPhase.Began)
+            Debug.LogError("No TileMovement component found on selected tile");
+            return;
+        }
+        
+        // Use the board's spacing for movement
+        float moveDistance = board != null ? board.actualTileSpacing : 1.0f;
+        
+        // Determine swipe direction
+        float x = Mathf.Abs(swipeDelta.x);
+        float y = Mathf.Abs(swipeDelta.y);
+        
+        Debug.Log($"Processing swipe: {swipeDelta}, Magnitude: {swipeDelta.magnitude}");
+        
+        if (x > y)
+        {
+            // Horizontal swipe
+            if (swipeDelta.x > 0)
             {
-                touchStartPos = touch.position;
-                isTouching = true;
-                
-                // Cast a ray to find the selected tile
-                selectedTile = GetTileAtPosition(touchStartPos);
+                Debug.Log("RIGHT swipe");
+                tileMovement.MoveRight(moveDistance);
             }
-            else if (touch.phase == UnityEngine.TouchPhase.Ended && isTouching)
+            else
             {
-                touchEndPos = touch.position;
-                isTouching = false;
-                
-                // Process the swipe only if we have a selected tile
-                if (selectedTile != null)
-                {
-                    ProcessSwipe();
-                }
-                
-                selectedTile = null;
+                Debug.Log("LEFT swipe");
+                tileMovement.MoveLeft(moveDistance);
+            }
+        }
+        else
+        {
+            // Vertical swipe
+            if (swipeDelta.y > 0)
+            {
+                Debug.Log("UP swipe");
+                tileMovement.MoveUp(moveDistance);
+            }
+            else
+            {
+                Debug.Log("DOWN swipe");
+                tileMovement.MoveDown(moveDistance);
             }
         }
     }
@@ -155,88 +181,6 @@ public class InputManager : MonoBehaviour
             {
                 Debug.Log($"TEST: Moving Right with distance {moveDistance}");
                 movement.MoveRight(moveDistance);
-            }
-        }
-    }
-    
-    private GameObject GetTileAtPosition(Vector2 screenPosition)
-    {
-        // Convert screen position to world position for 2D
-        Vector2 worldPoint = Camera.main.ScreenToWorldPoint(screenPosition);
-        RaycastHit2D hit = Physics2D.Raycast(worldPoint, Vector2.zero);
-        
-        if (hit.collider != null)
-        {
-            Debug.Log($"Hit object: {hit.collider.gameObject.name}");
-            // Check if the hit object has a Tile component
-            if (hit.collider.gameObject.GetComponent<Tile>() != null)
-            {
-                return hit.collider.gameObject;
-            }
-        }
-        else
-        {
-            Debug.Log("No collider hit");
-        }
-        
-        return null;
-    }
-    
-    private void ProcessSwipe()
-    {
-        Vector2 swipeDelta = touchEndPos - touchStartPos;
-        
-        // Check if the swipe distance is greater than the minimum
-        if (swipeDelta.magnitude < minSwipeDistance)
-        {
-            Debug.Log("Swipe too short");
-            return;
-        }
-        
-        // Get the tile movement component
-        TileMovement tileMovement = selectedTile.GetComponent<TileMovement>();
-        if (tileMovement == null)
-        {
-            Debug.LogError("No TileMovement component found on selected tile");
-            return;
-        }
-        
-        // Determine swipe direction
-        float x = Mathf.Abs(swipeDelta.x);
-        float y = Mathf.Abs(swipeDelta.y);
-        
-        Debug.Log($"Swipe delta: {swipeDelta}, Magnitude: {swipeDelta.magnitude}");
-        
-        if (x > y)
-        {
-            // Horizontal swipe
-            if (swipeDelta.x > 0)
-            {
-                // Right swipe
-                Debug.Log("Right swipe");
-                tileMovement.MoveRight(board.tileSpacing);
-            }
-            else
-            {
-                // Left swipe
-                Debug.Log("Left swipe");
-                tileMovement.MoveLeft(board.tileSpacing);
-            }
-        }
-        else
-        {
-            // Vertical swipe
-            if (swipeDelta.y > 0)
-            {
-                // Up swipe
-                Debug.Log("Up swipe");
-                tileMovement.MoveUp(board.tileSpacing);
-            }
-            else
-            {
-                // Down swipe
-                Debug.Log("Down swipe");
-                tileMovement.MoveDown(board.tileSpacing);
             }
         }
     }

@@ -13,6 +13,9 @@ public class Tile : MonoBehaviour
 
     private TileMovement movement;
 
+    // Reference to InputManager
+    private static InputManager inputManager;
+
     private void Awake()
     {
         // Initialize the SpriteRenderer
@@ -46,6 +49,46 @@ public class Tile : MonoBehaviour
         }
     }
 
+    private void Start()
+    {
+        // Try multiple ways to find the InputManager
+        FindInputManager();
+    }
+
+    private void FindInputManager()
+    {
+        // If already found, don't search again
+        if (inputManager != null) return;
+
+        // Try to find using FindObjectOfType
+        inputManager = FindObjectOfType<InputManager>();
+
+        if (inputManager == null)
+        {
+            // Try to find by name
+            GameObject imObj = GameObject.Find("InputManager");
+            if (imObj != null)
+            {
+                inputManager = imObj.GetComponent<InputManager>();
+            }
+
+            // If still not found, look for any active GameObject with the InputManager component
+            if (inputManager == null)
+            {
+                InputManager[] managers = FindObjectsOfType<InputManager>(true); // Include inactive
+                if (managers.Length > 0)
+                {
+                    inputManager = managers[0];
+                    Debug.Log($"Found InputManager on {inputManager.gameObject.name}");
+                }
+                else
+                {
+                    Debug.LogError("InputManager not found in scene. Please add an InputManager GameObject!");
+                }
+            }
+        }
+    }
+
     // Method to initialize the tile
     public void Initialize(string tileType)
     {
@@ -73,6 +116,24 @@ public class Tile : MonoBehaviour
     private void OnMouseDown()
     {
         Debug.Log($"Tile clicked: {TileType}");
+
+        // Try to find InputManager again if it's null
+        if (inputManager == null)
+        {
+            FindInputManager();
+        }
+
+        // Notify InputManager that this tile has been selected
+        if (inputManager != null)
+        {
+            inputManager.SetSelectedTile(gameObject);
+            Debug.Log($"Notified InputManager about click on {TileType}");
+        }
+        else
+        {
+            Debug.LogWarning("InputManager not found. Cannot process swipe input.");
+        }
+
         OnTileClicked();
     }
 }

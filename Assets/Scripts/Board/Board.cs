@@ -45,39 +45,49 @@ public class Board : MonoBehaviour
                 // Calculate tile position from the center offset
                 Vector3 position = new Vector3(startX + (col * tileSpacing), startY + (row * tileSpacing), 0);
 
-                // Determine if this is the first cell (0,0) where we want to place a GameTile
-                GameObject tileObject;
+                // Always create a regular tile for each position
+                GameObject regularTile = Instantiate(tilePrefab, position, Quaternion.identity, transform);
+                
+                // Initialize the regular tile
+                Tile tileScript = regularTile.GetComponent<Tile>();
+                if (tileScript != null)
+                {
+                    tileScript.Initialize($"Tile ({row}, {col})");
+
+                    // Alternate tile colors for a chessboard pattern
+                    Color tileColor = (row + col) % 2 == 0 ? color1 : color2;
+                    tileScript.GetComponent<SpriteRenderer>().color = tileColor;
+                }
+                
+                // Set regular tile size
+                regularTile.transform.localScale = new Vector3(tileSize, tileSize, 1f);
+
+                // For position (0,0), also add a GameTile on top
                 if (row == 0 && col == 0 && gameTilePrefab != null)
                 {
+                    // Position slightly in front of the regular tile
+                    Vector3 gameTilePos = new Vector3(position.x, position.y, position.z - 0.1f);
+                    
                     // Instantiate a GameTile at the first cell
-                    tileObject = Instantiate(gameTilePrefab, position, Quaternion.identity, transform);
+                    GameObject gameTileObject = Instantiate(gameTilePrefab, gameTilePos, Quaternion.identity, transform);
                     
                     // Initialize with a color
-                    GameTile gameTileScript = tileObject.GetComponent<GameTile>();
+                    GameTile gameTileScript = gameTileObject.GetComponent<GameTile>();
                     if (gameTileScript != null)
                     {
                         gameTileScript.Initialize(GameTile.TileColor.Red);
                     }
-                }
-                else
-                {
-                    // Instantiate a regular tile
-                    tileObject = Instantiate(tilePrefab, position, Quaternion.identity, transform);
                     
-                    // Initialize the tile
-                    Tile tileScript = tileObject.GetComponent<Tile>();
-                    if (tileScript != null)
+                    // Ensure GameTile is rendered on top of regular tiles
+                    SpriteRenderer renderer = gameTileObject.GetComponent<SpriteRenderer>();
+                    if (renderer != null)
                     {
-                        tileScript.Initialize($"Tile ({row}, {col})");
-
-                        // Alternate tile colors for a chessboard pattern
-                        Color tileColor = (row + col) % 2 == 0 ? color1 : color2;
-                        tileScript.GetComponent<SpriteRenderer>().color = tileColor;
+                        renderer.sortingOrder = 10;
                     }
+                    
+                    // Set game tile size
+                    gameTileObject.transform.localScale = new Vector3(tileSize, tileSize, 1f);
                 }
-                
-                // Set tile size
-                tileObject.transform.localScale = new Vector3(tileSize, tileSize, 1f);
             }
         }
     }

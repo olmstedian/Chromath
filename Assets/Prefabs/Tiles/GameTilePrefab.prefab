@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 5809337801506608297}
   - component: {fileID: 6561522562041116014}
   - component: {fileID: 6871748564252718135}
+  - component: {fileID: 5608450023775098585}
   m_Layer: 0
   m_Name: GameTilePrefab
   m_TagString: Untagged
@@ -29,7 +30,7 @@ Transform:
   m_GameObject: {fileID: 1240591313520527722}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -160,3 +161,17 @@ MonoBehaviour:
   greenSprite: {fileID: 21300000, guid: 0881f792253634593a71d8d0b040c6af, type: 3}
   blueSprite: {fileID: 21300000, guid: 8a0712e9623e0488cbecc3b6ced38508, type: 3}
   yellowSprite: {fileID: 21300000, guid: 42cfe1fbbea0b4e799dcd206060ab88e, type: 3}
+--- !u!114 &5608450023775098585
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1240591313520527722}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f664583624254fe3bcff43c1e5a3134, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 5
+  moveTime: 0.2
