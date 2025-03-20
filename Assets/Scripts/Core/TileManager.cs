@@ -6,6 +6,7 @@ public class TileManager : MonoBehaviour
 {
     [Header("Tile References")]
     [SerializeField] private GameObject gameTilePrefab;
+    [SerializeField] private GameObject obstacleTilePrefab; // Add reference to obstacle prefab
     [SerializeField] private Board boardManager;
     
     [Header("Tile Settings")]
@@ -287,9 +288,24 @@ public class TileManager : MonoBehaviour
     
     public bool MoveTile(GameObject tile, Vector2Int newGridPosition)
     {
+        // Safety check for basic validations
+        if (tile == null)
+        {
+            Debug.LogError("Attempted to move a null tile");
+            return false;
+        }
+        
         if (!tilesToPositions.ContainsKey(tile)) 
         {
             Debug.LogError($"Attempted to move a tile that's not being tracked: {tile.name}");
+            return false;
+        }
+        
+        // Validate grid positions are within bounds
+        if (newGridPosition.x < 0 || newGridPosition.x >= boardManager.columns ||
+            newGridPosition.y < 0 || newGridPosition.y >= boardManager.rows)
+        {
+            Debug.LogWarning($"Attempted to move tile to out-of-bounds position: {newGridPosition}");
             return false;
         }
         
@@ -300,68 +316,90 @@ public class TileManager : MonoBehaviour
         {
             // Check if we can merge with the target tile (same color)
             GameObject targetTile = tilePositions[newGridPosition];
-            GameTile movingGameTile = tile.GetComponent<GameTile>();
-            GameTile targetGameTile = targetTile.GetComponent<GameTile>();
-            
-            if (movingGameTile != null && targetGameTile != null && 
-                movingGameTile.CurrentColor == targetGameTile.CurrentColor)
+            if (targetTile == null)
             {
-                // Merge the tiles by adding their values
-                int newValue = movingGameTile.TileValue + targetGameTile.TileValue;
-                
-                // Remove the moving tile
-                tilePositions.Remove(oldGridPosition);
-                tilesToPositions.Remove(tile);
-                ReturnTileToPool(tile);
-                
-                // Update the target tile's value
-                targetGameTile.SetValue(newValue);
-                
-                // Play merge animation
-                StartCoroutine(MergeTileAnimation(targetTile));
-                
-                // Notify score manager about the merge
-                if (ScoreManager.Instance != null)
-                {
-                    ScoreManager.Instance.OnMatchMade(2); // 2 tiles merged
-                }
-                
-                // Notify GameManager to spawn a new tile after merger
-                if (GameManager.Instance != null)
-                {
-                    GameManager.Instance.OnTileMovementComplete();
-                }
-                
-                return true;
+                // Target tile reference is null, remove it and allow movement
+                Debug.LogWarning($"Found null tile reference at {newGridPosition} - cleaning up");
+                tilePositions.Remove(newGridPosition);
             }
             else
             {
-                Debug.LogWarning($"Cannot move to position {newGridPosition} - already occupied by {tilePositions[newGridPosition].name}");
-                return false;
+                GameTile movingGameTile = tile.GetComponent<GameTile>();
+                GameTile targetGameTile = targetTile.GetComponent<GameTile>();
+                
+                if (movingGameTile != null && targetGameTile != null && 
+                    movingGameTile.CurrentColor == targetGameTile.CurrentColor)
+                {
+                    // Merge the tiles by adding their values
+                    int newValue = movingGameTile.TileValue + targetGameTile.TileValue;
+                    
+                    // Update dictionaries first
+                    tilePositions.Remove(oldGridPosition);
+                    tilesToPositions.Remove(tile);
+                    
+                    // Update the target tile's value
+                    targetGameTile.SetValue(newValue);
+                    
+                    // Play merge animation
+                    StartCoroutine(MergeTileAnimation(targetTile));
+                    
+                    // Return the moving tile to the pool
+                    ReturnTileToPool(tile);
+                    
+                    // Check for chain merges (safely)
+                    StartCoroutine(CheckForChainMergesCoroutine(newGridPosition, targetGameTile.CurrentColor));
+                    
+                    // Notify score manager about the merge
+                    if (ScoreManager.Instance != null)
+                    {
+                        ScoreManager.Instance.OnMatchMade(2); // 2 tiles merged
+                    }
+                    
+                    // Notify GameManager to spawn a new tile after merger
+                    if (GameManager.Instance != null)
+                    {
+                        GameManager.Instance.OnTileMovementComplete();
+                    }
+                    
+                    return true;
+                }
+                else
+                {
+                    Debug.LogWarning($"Cannot move to position {newGridPosition} - already occupied by {tilePositions[newGridPosition].name}");
+                    return false;
+                }
             }
         }
         
         // No tile at target position, proceed with normal movement
-        // Update tracking dictionaries
-        if (tilePositions.ContainsKey(oldGridPosition))
+        try
         {
-            tilePositions.Remove(oldGridPosition);
+            // Update tracking dictionaries
+            if (tilePositions.ContainsKey(oldGridPosition))
+            {
+                tilePositions.Remove(oldGridPosition);
+            }
+            else
+            {
+                Debug.LogError($"Inconsistency detected: Tile at {oldGridPosition} not found in tilePositions");
+            }
+            
+            tilePositions[newGridPosition] = tile;
+            tilesToPositions[tile] = newGridPosition;
+            
+            Debug.Log($"Updated tracking: Moved tile from {oldGridPosition} to {newGridPosition}");
+            
+            // Move the tile
+            Vector3 newWorldPosition = GetWorldPositionFromGrid(newGridPosition);
+            StartCoroutine(MoveTileAnimation(tile, newWorldPosition));
+            
+            return true;
         }
-        else
+        catch (System.Exception e)
         {
-            Debug.LogError($"Inconsistency detected: Tile at {oldGridPosition} not found in tilePositions");
+            Debug.LogError($"Error moving tile: {e.Message}");
+            return false;
         }
-        
-        tilePositions[newGridPosition] = tile;
-        tilesToPositions[tile] = newGridPosition;
-        
-        Debug.Log($"Updated tracking: Moved tile from {oldGridPosition} to {newGridPosition}");
-        
-        // Move the tile
-        Vector3 newWorldPosition = GetWorldPositionFromGrid(newGridPosition);
-        StartCoroutine(MoveTileAnimation(tile, newWorldPosition));
-        
-        return true;
     }
     
     // Animation for merging tiles
@@ -425,6 +463,138 @@ public class TileManager : MonoBehaviour
         {
             GameManager.Instance.OnTileMovementComplete();
         }
+    }
+    
+    // NEW METHOD: Check for and process chain merges after an initial merge - with improved safety
+    private IEnumerator CheckForChainMergesCoroutine(Vector2Int position, GameTile.TileColor color)
+    {
+        // Wait a short time before checking for chain merges to let animations complete
+        yield return new WaitForSeconds(0.2f);
+        
+        // Safety check - verify position is valid
+        if (!tilePositions.ContainsKey(position))
+        {
+            Debug.LogWarning($"Cannot check for chain merges at {position} - position no longer exists in dictionary");
+            yield break;
+        }
+        
+        // Get the merged tile to use as target
+        GameObject mergedTile = tilePositions[position];
+        
+        if (mergedTile == null)
+        {
+            Debug.LogWarning($"Merged tile at {position} is null");
+            yield break;
+        }
+        
+        GameTile mergedGameTile = mergedTile.GetComponent<GameTile>();
+        if (mergedGameTile == null)
+        {
+            Debug.LogWarning($"Merged tile at {position} has no GameTile component");
+            yield break;
+        }
+        
+        int mergedValue = mergedGameTile.TileValue;
+        
+        // Track all tiles that will merge in this chain
+        List<GameObject> tilesToMerge = new List<GameObject>();
+        List<Vector2Int> positionsToMerge = new List<Vector2Int>();
+        
+        // Check in all four directions for same-color tiles
+        Vector2Int[] directions = new Vector2Int[]
+        {
+            Vector2Int.up,
+            Vector2Int.down,
+            Vector2Int.left,
+            Vector2Int.right
+        };
+        
+        foreach (Vector2Int dir in directions)
+        {
+            Vector2Int adjacentPos = position + dir;
+            
+            // Safety check - verify adjacent position is valid
+            if (tilePositions.TryGetValue(adjacentPos, out GameObject adjacentTile) && adjacentTile != null)
+            {
+                GameTile adjacentGameTile = adjacentTile.GetComponent<GameTile>();
+                
+                if (adjacentGameTile != null && adjacentGameTile.CurrentColor == color)
+                {
+                    tilesToMerge.Add(adjacentTile);
+                    positionsToMerge.Add(adjacentPos);
+                    mergedValue += adjacentGameTile.TileValue;
+                }
+            }
+        }
+        
+        // If there are tiles to merge, perform the chain merge
+        if (tilesToMerge.Count > 0)
+        {
+            Debug.Log($"Chain merging {tilesToMerge.Count} additional tiles with the merged tile");
+            
+            // Double check that merged tile still exists
+            if (!tilePositions.ContainsKey(position) || tilePositions[position] == null)
+            {
+                Debug.LogWarning("Merged tile no longer exists - canceling chain merge");
+                yield break;
+            }
+            
+            // Update the merged tile's value
+            mergedGameTile.SetValue(mergedValue);
+            
+            // Remove all the merged tiles
+            foreach (var pos in positionsToMerge)
+            {
+                // Safety check - verify position is still valid
+                if (tilePositions.TryGetValue(pos, out GameObject tileToRemove) && tileToRemove != null)
+                {
+                    tilePositions.Remove(pos);
+                    tilesToPositions.Remove(tileToRemove);
+                    
+                    // Animate movement to the merged position
+                    StartCoroutine(AnimateTileToMerge(tileToRemove, GetWorldPositionFromGrid(position)));
+                    
+                    // Small delay for visual effect
+                    yield return new WaitForSeconds(0.1f);
+                }
+            }
+            
+            // Play merge animation on the target tile if it still exists
+            if (tilePositions.ContainsKey(position) && tilePositions[position] != null)
+            {
+                StartCoroutine(MergeTileAnimation(tilePositions[position]));
+            }
+            
+            // Notify score manager about the chain merge
+            if (ScoreManager.Instance != null)
+            {
+                ScoreManager.Instance.OnMatchMade(tilesToMerge.Count);
+            }
+            
+            // Don't recursively check for more merges - too error-prone
+            // Just run one level of chain merges and stop
+        }
+    }
+    
+    // NEW METHOD: Animate a tile moving to merge with another tile
+    private IEnumerator AnimateTileToMerge(GameObject tile, Vector3 targetPosition)
+    {
+        Vector3 startPosition = tile.transform.position;
+        float elapsedTime = 0f;
+        float mergeDuration = 0.2f;
+        
+        while (elapsedTime < mergeDuration)
+        {
+            tile.transform.position = Vector3.Lerp(startPosition, targetPosition, elapsedTime / mergeDuration);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Make sure the tile ends at the exact target position
+        tile.transform.position = targetPosition;
+        
+        // Return the tile to the pool after it reaches the target
+        ReturnTileToPool(tile);
     }
     
     #endregion
@@ -583,15 +753,141 @@ public class TileManager : MonoBehaviour
     
     #region Board Management
     
+    // Enhanced clear board with better cleanup and safeguards
     public void ClearBoard()
     {
-        // Make a copy of keys to avoid modification while iterating
+        Debug.Log("Clearing the board of all tiles");
+        
+        // Stop any running coroutines to prevent errors with chain merges
+        StopAllCoroutines();
+        
+        // Make a copy of the keys to avoid modification during iteration
         List<Vector2Int> positions = new List<Vector2Int>(tilePositions.Keys);
         
+        // Remove all tiles immediately for a clean start
         foreach (Vector2Int pos in positions)
         {
-            RemoveTileAt(pos);
+            if (tilePositions.TryGetValue(pos, out GameObject tile))
+            {
+                // Remove from dictionaries
+                tilePositions.Remove(pos);
+                if (tile != null)
+                {
+                    tilesToPositions.Remove(tile);
+                    ReturnTileToPool(tile);
+                }
+            }
         }
+        
+        // Additional check for any lingering GameTile objects that might not be properly tracked
+        GameTile[] existingTiles = FindObjectsOfType<GameTile>();
+        foreach (GameTile tile in existingTiles)
+        {
+            if (tile != null && tile.gameObject != null && tile.gameObject.activeInHierarchy)
+            {
+                // Double check if it's already tracked
+                bool isTracked = false;
+                if (tilesToPositions.ContainsKey(tile.gameObject))
+                {
+                    isTracked = true;
+                }
+                
+                if (!isTracked)
+                {
+                    Debug.LogWarning($"Found untracked GameTile at {tile.transform.position} - returning to pool");
+                    // Try to remove from any dictionary entries just in case
+                    Vector2Int? position = GetGridPositionFromWorldSafe(tile.transform.position);
+                    if (position.HasValue && tilePositions.ContainsKey(position.Value))
+                    {
+                        tilePositions.Remove(position.Value);
+                    }
+                    
+                    ReturnTileToPool(tile.gameObject);
+                }
+            }
+        }
+        
+        // Final safety check - clear dictionaries completely in case something was missed
+        tilePositions.Clear();
+        tilesToPositions.Clear();
+    }
+
+    // Helper method to safely get grid position even for objects not precisely aligned
+    private Vector2Int? GetGridPositionFromWorldSafe(Vector3 worldPosition)
+    {
+        if (boardManager == null) return null;
+        
+        float boardWidth = (boardManager.columns - 1) * boardManager.tileSpacing;
+        float boardHeight = (boardManager.rows - 1) * boardManager.tileSpacing;
+        
+        float startX = -boardWidth / 2;
+        float startY = -boardHeight / 2;
+        
+        // Use a tolerance value to account for slight positioning errors
+        float tolerance = boardManager.tileSpacing * 0.25f;
+        
+        // Try to find the closest grid position
+        for (int col = 0; col < boardManager.columns; col++)
+        {
+            for (int row = 0; row < boardManager.rows; row++)
+            {
+                float gridX = startX + (col * boardManager.tileSpacing);
+                float gridY = startY + (row * boardManager.tileSpacing);
+                
+                if (Mathf.Abs(worldPosition.x - gridX) < tolerance && 
+                    Mathf.Abs(worldPosition.y - gridY) < tolerance)
+                {
+                    return new Vector2Int(col, row);
+                }
+            }
+        }
+        
+        // If no matching grid position is found, return null
+        return null;
+    }
+
+    // New method to clear the board with animation
+    private IEnumerator ClearBoardWithAnimation(List<Vector2Int> positions)
+    {
+        // Sort positions for a wave effect (optional)
+        // positions.Sort((a, b) => (a.x + a.y).CompareTo(b.x + b.y));
+        
+        // Remove tiles with small delays between them
+        foreach (Vector2Int pos in positions)
+        {
+            if (tilePositions.TryGetValue(pos, out GameObject tile))
+            {
+                // Animate the tile shrinking away
+                StartCoroutine(ScaleTileOut(tile, pos));
+                
+                // Small delay between tiles for wave effect
+                yield return new WaitForSeconds(0.05f);
+            }
+        }
+    }
+
+    // Animation for removing tiles
+    private IEnumerator ScaleTileOut(GameObject tile, Vector2Int position)
+    {
+        if (tile == null) yield break;
+        
+        Vector3 originalScale = tile.transform.localScale;
+        float duration = 0.2f;
+        float elapsed = 0;
+        
+        // Scale down to nothing
+        while (elapsed < duration)
+        {
+            if (tile == null) yield break;
+            
+            float t = elapsed / duration;
+            tile.transform.localScale = Vector3.Lerp(originalScale, Vector3.zero, t);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Now actually remove the tile from the board
+        RemoveTileAt(position);
     }
     
     public void GenerateRandomTile()
@@ -599,12 +895,8 @@ public class TileManager : MonoBehaviour
         // Find an empty spot on the board
         List<Vector2Int> emptyPositions = new List<Vector2Int>();
         
-        // Print all currently occupied positions for debugging
-        Debug.Log("Currently occupied positions:");
-        foreach (Vector2Int pos in tilePositions.Keys)
-        {
-            Debug.Log($"  Occupied: {pos} by {tilePositions[pos].name}");
-        }
+        // Reduce debug log verbosity to just the essentials
+        Debug.Log($"Finding empty positions for new tile. Board size: {boardManager.rows}x{boardManager.columns}");
         
         for (int row = 0; row < boardManager.rows; row++)
         {
@@ -672,7 +964,8 @@ public class TileManager : MonoBehaviour
                 int randomValue = Random.Range(1, 7); // Random.Range is exclusive for the upper bound with integers
                 gameTile.SetValue(randomValue);
                 
-                Debug.Log($"Successfully created {randomColor} tile with value {randomValue} at position {randomPosition}");
+                // Only keep essential logs
+                Debug.Log($"Created {randomColor} tile with value {randomValue} at position {randomPosition}");
             }
             
             StartCoroutine(ScaleTileIn(newTile));
@@ -703,6 +996,79 @@ public class TileManager : MonoBehaviour
         
         // Ensure final scale is correct
         tile.transform.localScale = originalScale;
+    }
+
+    // Create a method to spawn obstacle tiles
+    public GameObject CreateObstacleTileAt(Vector2Int gridPosition)
+    {
+        if (IsTileAt(gridPosition))
+        {
+            Debug.LogWarning($"Tile already exists at position {gridPosition}");
+            return null;
+        }
+        
+        // Instantiate the obstacle tile
+        Vector3 worldPosition = GetWorldPositionFromGrid(gridPosition);
+        GameObject obstacleTile = Instantiate(obstacleTilePrefab, worldPosition, Quaternion.identity, boardManager.transform);
+        
+        // Set the scale
+        obstacleTile.transform.localScale = new Vector3(boardManager.tileSize, boardManager.tileSize, 1f);
+        
+        // Ensure proper z-position to be above the board
+        Vector3 pos = obstacleTile.transform.position;
+        obstacleTile.transform.position = new Vector3(pos.x, pos.y, -0.1f);
+        
+        // Track the tile
+        tilePositions[gridPosition] = obstacleTile;
+        tilesToPositions[obstacleTile] = gridPosition;
+        
+        // Make sure the sprite renderer has a high sorting order
+        SpriteRenderer renderer = obstacleTile.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+        {
+            renderer.sortingOrder = 10;
+        }
+        
+        Debug.Log($"Created obstacle tile at position {gridPosition}");
+        
+        return obstacleTile;
+    }
+
+    // Add a method to generate a random obstacle tile
+    public void GenerateRandomObstacleTile()
+    {
+        // Find an empty spot on the board
+        List<Vector2Int> emptyPositions = new List<Vector2Int>();
+        
+        for (int row = 0; row < boardManager.rows; row++)
+        {
+            for (int col = 0; col < boardManager.columns; col++)
+            {
+                Vector2Int position = new Vector2Int(col, row);
+                if (!tilePositions.ContainsKey(position))
+                {
+                    emptyPositions.Add(position);
+                }
+            }
+        }
+        
+        if (emptyPositions.Count == 0)
+        {
+            Debug.LogWarning("No empty spaces for obstacle tiles!");
+            return;
+        }
+        
+        // Select a random empty position
+        Vector2Int randomPosition = emptyPositions[Random.Range(0, emptyPositions.Count)];
+        
+        // Create the obstacle tile
+        GameObject obstacleTile = CreateObstacleTileAt(randomPosition);
+        
+        // Add a scale-in effect
+        if (obstacleTile != null)
+        {
+            StartCoroutine(ScaleTileIn(obstacleTile));
+        }
     }
     
     #endregion

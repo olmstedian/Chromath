@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections;
 
 public class GameUIManager : MonoBehaviour
 {
@@ -11,6 +12,7 @@ public class GameUIManager : MonoBehaviour
     [SerializeField] private GameObject pausePanel;      // Pause menu
     [SerializeField] private GameObject winPanel;        // Win screen
     [SerializeField] private GameObject gameOverPanel;   // Game Over screen
+    [SerializeField] private GameObject levelUpPanel;    // Level Up notification panel
 
     [Header("Gameplay UI Elements")]
     [SerializeField] private TextMeshProUGUI scoreText;
@@ -26,6 +28,12 @@ public class GameUIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI gameOverText;
     [SerializeField] private TextMeshProUGUI gameOverScoreText;
     [SerializeField] private TextMeshProUGUI gameOverHighScoreText;
+
+    [Header("Level Up UI Elements")]
+    [SerializeField] private TextMeshProUGUI levelUpText;
+    [SerializeField] private TextMeshProUGUI newLevelText;
+    [SerializeField] private Image levelUpFillBar;
+    [SerializeField] private Button continueButton; // Add continue button reference
     
     // Keep track of the current UI state
     private enum UIState { MainMenu, Gameplay, Paused, Win, GameOver }
@@ -183,6 +191,21 @@ public class GameUIManager : MonoBehaviour
         {
             levelText.text = $"Level: {level}";
         }
+        
+        // If this isn't the first level, show the level up panel (unless suppressed)
+        if (level > 1 && currentState == UIState.Gameplay && !SuppressLevelUpPanel)
+        {
+            ShowLevelUpPanel(level);
+        }
+    }
+
+    // Add a new method that updates the level text without showing the level up panel
+    public void UpdateLevelSilently(int level)
+    {
+        if (levelText)
+        {
+            levelText.text = $"Level: {level}";
+        }
     }
     
     private void UpdateFinalScore(int finalScore, int highScore)
@@ -267,4 +290,196 @@ public class GameUIManager : MonoBehaviour
     }
     
     #endregion
+
+    // Method to show the level up panel with continue button
+    public void ShowLevelUpPanel(int newLevel)
+    {
+        if (levelUpPanel != null)
+        {
+            // Set the text values
+            if (newLevelText != null)
+            {
+                newLevelText.text = $"Level {newLevel}";
+            }
+            
+            if (levelUpText != null)
+            {
+                // Add different messages based on level
+                string levelMessage = "Level Up!";
+                
+                if (newLevel > 5)
+                {
+                    levelMessage = "Getting Harder!";
+                }
+                
+                if (newLevel > 8)
+                {
+                    levelMessage = "Master Level!";
+                }
+                
+                levelUpText.text = levelMessage;
+            }
+            
+            // Setup the continue button
+            if (continueButton != null)
+            {
+                // Clear existing listeners and add new one
+                continueButton.onClick.RemoveAllListeners();
+                continueButton.onClick.AddListener(() => OnContinueToNextLevel(newLevel));
+            }
+            
+            // Ensure the panel is in front of everything
+            Canvas levelUpCanvas = levelUpPanel.GetComponent<Canvas>();
+            if (levelUpCanvas != null)
+            {
+                // Make sure it has the highest sorting order
+                levelUpCanvas.sortingOrder = 100;
+            }
+            else
+            {
+                // If it doesn't have its own canvas, adjust any canvas group
+                CanvasGroup canvasGroup = levelUpPanel.GetComponent<CanvasGroup>();
+                if (canvasGroup != null)
+                {
+                    // Make sure it's fully visible
+                    canvasGroup.alpha = 1f;
+                    canvasGroup.interactable = true;
+                    canvasGroup.blocksRaycasts = true;
+                }
+                
+                // Force it to the foreground by setting its position
+                RectTransform rect = levelUpPanel.GetComponent<RectTransform>();
+                if (rect != null)
+                {
+                    rect.SetAsLastSibling();
+                }
+            }
+            
+            // Deactivate the game panel to ensure the level up panel is fully visible
+            if (gamePanel != null)
+            {
+                gamePanel.SetActive(false);
+            }
+            
+            // Pause the game while showing the level up panel
+            Time.timeScale = 0;
+            
+            // Make the panel active
+            levelUpPanel.SetActive(true);
+            
+            // Play panel entry animation if you have one
+            StartCoroutine(AnimateLevelUpPanel(false)); // false = don't auto-hide
+        }
+    }
+
+    // New method to handle continue button click
+    private void OnContinueToNextLevel(int level)
+    {
+        // Hide the level up panel
+        levelUpPanel.SetActive(false);
+        
+        // Re-activate the game panel
+        if (gamePanel != null)
+        {
+            gamePanel.SetActive(true);
+        }
+        
+        // Resume game time
+        Time.timeScale = 1;
+        
+        // Call level manager to start the next level - prevent showing level up panel again
+        if (LevelManager.Instance != null)
+        {
+            Debug.Log($"Continue button clicked - transitioning to level {level}");
+            
+            // Temporarily disable showing level up panel while transitioning
+            SuppressLevelUpPanel = true;
+            
+            LevelManager.Instance.StartNextLevelAfterContinue(level);
+        }
+        else
+        {
+            Debug.LogError("Cannot continue to next level - LevelManager.Instance is null");
+        }
+    }
+
+    // Updated animation for level up panel (with auto-hide parameter)
+    private IEnumerator AnimateLevelUpPanel(bool autoHide = true)
+    {
+        // Scale up effect for panel
+        RectTransform panelRect = levelUpPanel.GetComponent<RectTransform>();
+        if (panelRect != null)
+        {
+            Vector3 startScale = panelRect.localScale * 0.8f;
+            Vector3 endScale = panelRect.localScale;
+            panelRect.localScale = startScale;
+            
+            // Animate scaling and fill bar simultaneously
+            float animationTime = 1.0f;
+            float elapsed = 0f;
+            
+            while (elapsed < animationTime)
+            {
+                elapsed += Time.unscaledDeltaTime; // Use unscaled time because game is paused
+                float t = elapsed / animationTime;
+                
+                // Update scale
+                panelRect.localScale = Vector3.Lerp(startScale, endScale, t);
+                
+                // Update fill bar if it exists
+                if (levelUpFillBar != null)
+                {
+                    levelUpFillBar.fillAmount = t;
+                }
+                
+                yield return null;
+            }
+            
+            // Ensure we end at exactly the right values
+            panelRect.localScale = endScale;
+            if (levelUpFillBar != null)
+            {
+                levelUpFillBar.fillAmount = 1f;
+            }
+        }
+        
+        // If autoHide, wait and then hide the panel
+        if (autoHide)
+        {
+            // Wait for user to read
+            yield return new WaitForSecondsRealtime(2.0f);
+            
+            // Fade out effect
+            CanvasGroup canvasGroup = levelUpPanel.GetComponent<CanvasGroup>();
+            if (canvasGroup != null)
+            {
+                float fadeTime = 0.5f;
+                float elapsed = 0f;
+                
+                while (elapsed < fadeTime)
+                {
+                    elapsed += Time.unscaledDeltaTime;
+                    canvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / fadeTime);
+                    yield return null;
+                }
+                
+                canvasGroup.alpha = 0f;
+            }
+            
+            // Hide the panel
+            levelUpPanel.SetActive(false);
+            
+            // Reset opacity if we used fade effect
+            if (canvasGroup != null)
+            {
+                canvasGroup.alpha = 1f;
+            }
+            
+            // Resume game time
+            Time.timeScale = 1;
+        }
+    }
+
+    // Add this property to control whether level up panel should appear
+    public bool SuppressLevelUpPanel { get; set; } = false;
 }

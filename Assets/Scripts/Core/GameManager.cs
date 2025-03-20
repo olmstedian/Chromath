@@ -124,15 +124,25 @@ public class GameManager : MonoBehaviour
             levelTimer = levelManager.GetCurrentLevelDuration();
             currentLevel = levelManager.GetCurrentLevel();
             
+            // IMPORTANT: Remove this since LevelManager will handle initial tile generation
+            // We don't want both GameManager and LevelManager generating tiles
+            /*
             // Generate initial random tiles
             if (currentLevel == 1)
             {
                 GenerateInitialTiles(3); // Generate 3 random tiles for level 1
             }
+            */
         }
         else
         {
             levelTimer = levelDuration;
+            
+            // Only generate initial tiles if LevelManager doesn't exist
+            if (currentLevel == 1)
+            {
+                GenerateInitialTiles(3); // Generate 3 random tiles for level 1
+            }
         }
         
         // Update UI
@@ -328,6 +338,16 @@ public class GameManager : MonoBehaviour
     
     private void IncreaseDifficulty()
     {
+        // Introduce more obstacles as difficulty increases
+        if (levelManager != null)
+        {
+            // Chance to introduce an obstacle
+            if (currentLevel >= 2 && Random.value < 0.5f)
+            {
+                levelManager.IntroduceSpecialElement(0); // Introduce obstacles
+            }
+        }
+        
         // TODO: Implement difficulty scaling based on level
         // Examples:
         // - Decrease time bonus
@@ -354,6 +374,18 @@ public class GameManager : MonoBehaviour
             {
                 TileManager.Instance.GenerateRandomTile();
             }
+        }
+    }
+
+    // Add this new method to set the level timer
+    public void SetLevelTimer(float time)
+    {
+        levelTimer = time;
+        
+        // Update UI
+        if (uiManager != null)
+        {
+            uiManager.UpdateTime(levelTimer);
         }
     }
 
