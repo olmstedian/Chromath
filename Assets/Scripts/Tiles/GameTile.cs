@@ -27,6 +27,9 @@ public class GameTile : MonoBehaviour
     [SerializeField] private Sprite greenSprite;
     [SerializeField] private Sprite blueSprite;
     [SerializeField] private Sprite yellowSprite;
+
+    // Add to the class
+    private SpecialTile specialTileComponent;
     
     private void Awake()
     {
@@ -60,6 +63,17 @@ public class GameTile : MonoBehaviour
             // Alternatively, adjust the Z position slightly forward
             Vector3 pos = transform.position;
             transform.position = new Vector3(pos.x, pos.y, -0.1f);
+        }
+    }
+
+    private void Start()
+    {
+        // Check if we already have the SpecialTile component
+        specialTileComponent = GetComponent<SpecialTile>();
+        if (specialTileComponent == null)
+        {
+            // Add it but keep it inactive
+            specialTileComponent = gameObject.AddComponent<SpecialTile>();
         }
     }
     
@@ -190,5 +204,45 @@ public class GameTile : MonoBehaviour
     {
         TileValue = value;
         UpdateVisuals();
+    }
+
+    // New method to make this a special tile
+    public void MakeSpecial(SpecialTileType specialType)
+    {
+        if (specialTileComponent == null)
+        {
+            specialTileComponent = gameObject.AddComponent<SpecialTile>();
+        }
+        
+        specialTileComponent.SetSpecialType(specialType);
+        
+        // Optionally update the visual appearance of the tile itself
+        // This could involve adding an overlay, changing the sprite, etc.
+    }
+
+    // Method to check if this is a special tile
+    public bool IsSpecial()
+    {
+        return specialTileComponent != null && 
+               specialTileComponent.GetSpecialType() != SpecialTileType.None;
+    }
+
+    // Method to get the special type (if any)
+    public SpecialTileType GetSpecialType()
+    {
+        if (specialTileComponent != null)
+        {
+            return specialTileComponent.GetSpecialType();
+        }
+        return SpecialTileType.None;
+    }
+
+    // Method to activate the special effect
+    public void ActivateSpecialEffect(Vector2Int position)
+    {
+        if (IsSpecial())
+        {
+            specialTileComponent.ActivateSpecialEffect(position);
+        }
     }
 }

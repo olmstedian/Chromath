@@ -494,7 +494,7 @@ public class TileManager : MonoBehaviour
             yield break;
         }
         
-        int mergedValue = mergedGameTile.TileValue;
+        int originalValue = mergedGameTile.TileValue;
         
         // Track all tiles that will merge in this chain
         List<GameObject> tilesToMerge = new List<GameObject>();
@@ -522,7 +522,7 @@ public class TileManager : MonoBehaviour
                 {
                     tilesToMerge.Add(adjacentTile);
                     positionsToMerge.Add(adjacentPos);
-                    mergedValue += adjacentGameTile.TileValue;
+                    originalValue += adjacentGameTile.TileValue;
                 }
             }
         }
@@ -532,17 +532,20 @@ public class TileManager : MonoBehaviour
         {
             Debug.Log($"Chain merging {tilesToMerge.Count} additional tiles with the merged tile");
             
+            // Check if we have 3 or more tiles in total (including original)
+            bool createSpecialTile = tilesToMerge.Count >= 2; // 3+ tiles total
+            
             // Double check that merged tile still exists
             if (!tilePositions.ContainsKey(position) || tilePositions[position] == null)
             {
                 Debug.LogWarning("Merged tile no longer exists - canceling chain merge");
                 yield break;
             }
+
+            // Get the total value from all merged tiles
+            int totalValue = originalValue;
             
-            // Update the merged tile's value
-            mergedGameTile.SetValue(mergedValue);
-            
-            // Remove all the merged tiles
+            // Process merged tiles
             foreach (var pos in positionsToMerge)
             {
                 // Safety check - verify position is still valid
@@ -557,6 +560,29 @@ public class TileManager : MonoBehaviour
                     // Small delay for visual effect
                     yield return new WaitForSeconds(0.1f);
                 }
+            }
+            
+            // Special tile creation for 3+ merged tiles
+            if (createSpecialTile)
+            {
+                // Determine which special tile to create based on merge pattern
+                SpecialTileType specialType = DetermineSpecialTileType(position, positionsToMerge);
+                
+                // Update the merged tile to be a special tile
+                GameTile targetTile = tilePositions[position].GetComponent<GameTile>();
+                if (targetTile != null)
+                {
+                    targetTile.SetValue(totalValue);
+                    targetTile.MakeSpecial(specialType);
+                }
+                
+                // Apply visual effect for special tile creation
+                StartCoroutine(SpecialTileCreationEffect(tilePositions[position]));
+            }
+            else
+            {
+                // Regular value update for normal merges
+                mergedGameTile.SetValue(totalValue);
             }
             
             // Play merge animation on the target tile if it still exists
@@ -595,6 +621,83 @@ public class TileManager : MonoBehaviour
         
         // Return the tile to the pool after it reaches the target
         ReturnTileToPool(tile);
+    }
+
+    // Determine what kind of special tile to create based on merge pattern
+    private SpecialTileType DetermineSpecialTileType(Vector2Int centerPos, List<Vector2Int> mergedPositions)
+    {
+        // Check for row pattern
+        bool isRowPattern = true;
+        int row = centerPos.y;
+        foreach (Vector2Int pos in mergedPositions)
+        {
+            if (pos.y != row)
+            {
+                isRowPattern = false;
+                break;
+            }
+        }
+        
+        // Check for column pattern
+        bool isColumnPattern = true;
+        int column = centerPos.x;
+        foreach (Vector2Int pos in mergedPositions)
+        {
+            if (pos.x != column)
+            {
+                isColumnPattern = false;
+                break;
+            }
+        }
+        
+        // Check for L shape or other patterns
+        
+        // Assign special tile type based on pattern
+        if (isRowPattern)
+        {
+            return SpecialTileType.RowClear;
+        }
+        else if (isColumnPattern)
+        {
+            return SpecialTileType.ColumnClear;
+        }
+        else if (mergedPositions.Count >= 4) 
+        {
+            return SpecialTileType.AreaClear;
+        }
+        else 
+        {
+            // Default to value boost for 3-tile merges with no pattern
+            return SpecialTileType.ValueBoost;
+        }
+    }
+
+    // Visual effect for special tile creation
+    private IEnumerator SpecialTileCreationEffect(GameObject tile)
+    {
+        // Save original scale
+        Vector3 originalScale = tile.transform.localScale;
+        
+        // Pulse effect
+        for (int i = 0; i < 2; i++)
+        {
+            // Scale up
+            float duration = 0.15f;
+            float elapsed = 0f;
+            
+            while (elapsed < duration)
+            {
+                float scale = 1.0f + 0.3f * Mathf.Sin(elapsed / duration * Mathf.PI);
+                tile.transform.localScale = originalScale * scale;
+                elapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
+        }
+        
+        // Ensure final scale is correct
+        tile.transform.localScale = originalScale;
+        
+        // Add particles or other effects here
     }
     
     #endregion
