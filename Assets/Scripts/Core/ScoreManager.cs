@@ -32,7 +32,6 @@ public class ScoreManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -284,6 +283,16 @@ public class ScoreManager : MonoBehaviour
         
         // Also increment combo
         IncrementCombo();
+        
+        // Add a temporary multiplier boost for a short time
+        AddMultiplierBoost(0.5f, 5f); // 0.5x boost for 5 seconds
+        
+        // Visual feedback that a special move was performed
+        if (GameUIManager.Instance != null)
+        {
+            // Use the Instance property to access the singleton
+            GameUIManager.Instance.ShowSpecialMoveNotification(basePoints);
+        }
     }
     
     // Call this at the end of the game

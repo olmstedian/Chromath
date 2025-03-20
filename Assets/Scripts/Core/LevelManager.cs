@@ -39,7 +39,6 @@ public class LevelManager : MonoBehaviour
     private float currentLevelDuration;
     private float currentTileGenerationInterval;
     private float tileGenerationTimer;
-    private bool isGeneratingTiles = false;
 
     // Add tracking variables
     private int obstaclesInCurrentLevel = 0;
@@ -53,7 +52,6 @@ public class LevelManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -91,6 +89,21 @@ public class LevelManager : MonoBehaviour
                 scoreThresholds[i] = 1000 * (i + 1);
             }
         }
+        else if (scoreThresholds.Length < maxLevel)
+        {
+            // If the array is too small, resize it
+            Debug.LogWarning($"scoreThresholds array is too small ({scoreThresholds.Length}), resizing to {maxLevel}");
+            System.Array.Resize(ref scoreThresholds, maxLevel);
+            
+            // Fill in any missing thresholds
+            for (int i = 0; i < maxLevel; i++)
+            {
+                if (i >= scoreThresholds.Length || scoreThresholds[i] == 0)
+                {
+                    scoreThresholds[i] = 1000 * (i + 1);
+                }
+            }
+        }
     }
     
     private void Start()
@@ -102,9 +115,12 @@ public class LevelManager : MonoBehaviour
         // Use direct reference without explicit namespace
         tileManager = FindObjectOfType<TileManager>();
         
-        // Don't initialize level settings here - this will be called by GameManager
-        // Comment out to prevent duplicate initialization
-        // ResetLevel();
+        // Initialize current level to at least 1 to prevent "invalid currentLevel: 0" errors
+        if (currentLevel <= 0)
+        {
+            currentLevel = startingLevel;
+            Debug.Log($"Initialized currentLevel to {currentLevel} in Start()");
+        }
     }
     
     private void Update()
@@ -200,7 +216,7 @@ public class LevelManager : MonoBehaviour
         }
     }
 
-    // New method to start the next level after Continue button is clicked
+    // Improved level transition method
     public void StartNextLevelAfterContinue(int level)
     {
         Debug.Log($"Starting level {level} after continue button click");
@@ -209,11 +225,11 @@ public class LevelManager : MonoBehaviour
         GameUIManager uiManager = GameUIManager.Instance;
         if (uiManager != null)
         {
-            uiManager.SuppressLevelUpPanel = true; // Add this flag to GameUIManager
+            uiManager.SuppressLevelUpPanel = true;
         }
         
-        // Clear the board
-        ClearBoardForNextLevel();
+        // More thorough board clearing for next level
+        ClearBoardWithValidation();
         
         // Make sure we use the passed level value, not the current level
         // This fixes potential desync issues
@@ -239,14 +255,43 @@ public class LevelManager : MonoBehaviour
         // Reset obstacle counter for new level
         obstaclesInCurrentLevel = 0;
         
+        // Ensure Physics2D is synced before continuing
+        Physics2D.SyncTransforms();
+        
         // Generate initial tiles for this level after a short delay
         StartCoroutine(DelayedTileGeneration());
+    }
+
+    // Enhanced board clearing method with validation
+    private void ClearBoardWithValidation()
+    {
+        // Clear existing tiles and obstacles
+        if (tileManager != null)
+        {
+            tileManager.ClearBoard();
+            tileManager.ValidateAllTilePositions();
+        }
+        
+        // Clear obstacles using ObstacleManager
+        if (ObstacleManager.Instance != null)
+        {
+            ObstacleManager.Instance.ClearAllObstacles();
+        }
+        
+        // Force a GC collection to clean up any lingering references
+        System.GC.Collect();
     }
 
     private IEnumerator DelayedTileGeneration()
     {
         // Short delay to ensure UI has transitioned properly
         yield return new WaitForSeconds(0.5f);
+        
+        // Run validation to ensure the board state is clean
+        if (tileManager != null)
+        {
+            tileManager.ValidateAllTilePositions();
+        }
         
         // Generate initial tiles for the new level
         GenerateInitialTilesForLevel();
@@ -270,9 +315,33 @@ public class LevelManager : MonoBehaviour
 
     private void CheckForLevelUp(int currentScore)
     {
+        // Prevent processing if game hasn't fully initialized yet
+        if (currentLevel <= 0) 
+        {
+            Debug.Log("Skipping CheckForLevelUp because currentLevel is not initialized yet");
+            return;
+        }
+        
         if (currentLevel >= maxLevel) return;
         
-        int nextLevelThreshold = scoreThresholds[currentLevel - 1];
+        // Make sure we don't exceed the array bounds
+        if (currentLevel > scoreThresholds.Length)
+        {
+            Debug.LogError($"Invalid currentLevel: {currentLevel}. scoreThresholds length: {scoreThresholds.Length}");
+            return;
+        }
+        
+        // Fix array index (subtract 1 since arrays are 0-based but levels start at 1)
+        int thresholdIndex = currentLevel - 1;
+        
+        // Double-check that the index is valid
+        if (thresholdIndex < 0 || thresholdIndex >= scoreThresholds.Length)
+        {
+            Debug.LogError($"Invalid threshold index: {thresholdIndex}. scoreThresholds length: {scoreThresholds.Length}");
+            return;
+        }
+        
+        int nextLevelThreshold = scoreThresholds[thresholdIndex];
         if (currentScore >= nextLevelThreshold)
         {
             AdvanceToNextLevel();
@@ -285,12 +354,13 @@ public class LevelManager : MonoBehaviour
         // Clear existing tiles and obstacles
         if (tileManager != null)
         {
+            // Make sure we use the correct method name
             tileManager.ClearBoard();
         }
     }
 
-    // New method to generate initial tiles for each level
-    private void GenerateInitialTilesForLevel()
+    // Improved method to generate initial tiles
+    public void GenerateInitialTilesForLevel()
     {
         // Clear any existing debug logs for cleaner output
         Debug.Log("Generating initial tiles for level " + currentLevel);
@@ -301,24 +371,56 @@ public class LevelManager : MonoBehaviour
         // Generate initial tiles
         if (tileManager != null)
         {
-            // First make sure the board is clear
+            // First make sure the board is clean
             tileManager.ClearBoard();
             
-            for (int i = 0; i < initialTiles; i++)
+            // Run a validation to make sure everything is clean
+            tileManager.ValidateAllTilePositions();
+            
+            // Force a physics update
+            Physics2D.SyncTransforms();
+            
+            // Add a small delay to ensure physics is properly updated
+            StartCoroutine(GenerateInitialTilesWithDelay(initialTiles));
+        }
+    }
+
+    private IEnumerator GenerateInitialTilesWithDelay(int count)
+    {
+        // Wait a frame to ensure physics is updated
+        yield return null;
+        
+        for (int i = 0; i < count; i++)
+        {
+            // Add a small delay between tile generation for better visualization
+            yield return new WaitForSeconds(0.2f);
+            
+            if (tileManager != null)
             {
-                // Add a small delay between tile generation for better visualization
-                StartCoroutine(GenerateTileWithDelay(i * 0.2f));
+                // Make sure we use the correct method name
+                tileManager.GenerateRandomTile();
+                
+                // Force physics update after each tile
+                Physics2D.SyncTransforms();
             }
         }
     }
 
+    // Improved version of tile generation with delay
     private IEnumerator GenerateTileWithDelay(float delay)
     {
         yield return new WaitForSeconds(delay);
         
         if (tileManager != null)
         {
+            // Validate positions to ensure clean state
+            tileManager.ValidateAllTilePositions();
+            
+            // Make sure we use the correct method name
             tileManager.GenerateRandomTile();
+            
+            // Force physics update
+            Physics2D.SyncTransforms();
         }
     }
     
@@ -328,15 +430,16 @@ public class LevelManager : MonoBehaviour
     
     public void StartTileGeneration()
     {
-        // We're no longer using automatic tile generation
-        isGeneratingTiles = true;
-        // Don't need the timer anymore
-        // tileGenerationTimer = currentTileGenerationInterval;
+        // We're using event-based tile generation instead of automatic
+        // Just reset the timer without setting the flag
+        tileGenerationTimer = currentTileGenerationInterval;
     }
     
     public void StopTileGeneration()
     {
-        isGeneratingTiles = false;
+        // We don't need to set flags since we're not using automatic generation
+        // Just make sure any running coroutines are stopped
+        StopAllCoroutines();
     }
     
     // This method will now have a chance to spawn an obstacle instead of a normal tile
@@ -354,14 +457,26 @@ public class LevelManager : MonoBehaviour
             
             if (spawnObstacle)
             {
-                tileManager.GenerateRandomObstacleTile();
-                obstaclesInCurrentLevel++;
+                // Use ObstacleManager instead of TileManager
+                if (ObstacleManager.Instance != null)
+                {
+                    GameObject obstacle = ObstacleManager.Instance.GenerateRandomObstacle();
+                    if (obstacle != null)
+                    {
+                        // Set durability based on level
+                        int baseDurability = 1;
+                        if (currentLevel > 5) baseDurability = 2;
+                        if (currentLevel > 8) baseDurability = 3;
+                        
+                        ObstacleManager.Instance.UpdateObstacleTileScript(obstacle, baseDurability);
+                        obstaclesInCurrentLevel++;
+                    }
+                }
                 return;
             }
         }
         
         // Otherwise spawn a normal tile
-        GameTile.TileColor color = GetRandomColorBasedOnLevel();
         tileManager.GenerateRandomTile();
     }
     
@@ -433,9 +548,9 @@ public class LevelManager : MonoBehaviour
         switch (elementType)
         {
             case 0: // Introduce obstacle tiles
-                if (tileManager != null && obstaclesInCurrentLevel < maxObstaclesPerLevel)
+                if (ObstacleManager.Instance != null && obstaclesInCurrentLevel < maxObstaclesPerLevel)
                 {
-                    tileManager.GenerateRandomObstacleTile();
+                    ObstacleManager.Instance.GenerateRandomObstacle();
                     obstaclesInCurrentLevel++;
                 }
                 break;
@@ -478,13 +593,22 @@ public class LevelManager : MonoBehaviour
         
         Debug.Log($"Introducing {obstaclesToSpawn} obstacles at level {currentLevel}");
         
-        // Spawn the obstacles
+        // Spawn the obstacles using ObstacleManager instead of TileManager
         for (int i = 0; i < obstaclesToSpawn; i++)
         {
-            if (tileManager != null)
+            if (ObstacleManager.Instance != null)
             {
-                tileManager.GenerateRandomObstacleTile();
-                obstaclesInCurrentLevel++;
+                GameObject obstacle = ObstacleManager.Instance.GenerateRandomObstacle();
+                if (obstacle != null)
+                {
+                    // Set durability based on level
+                    int baseDurability = 1;
+                    if (currentLevel > 5) baseDurability = 2;
+                    if (currentLevel > 8) baseDurability = 3;
+                    
+                    ObstacleManager.Instance.UpdateObstacleTileScript(obstacle, baseDurability);
+                    obstaclesInCurrentLevel++;
+                }
             }
         }
     }

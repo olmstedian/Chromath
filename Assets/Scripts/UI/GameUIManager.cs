@@ -48,7 +48,6 @@ public class GameUIManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -61,6 +60,9 @@ public class GameUIManager : MonoBehaviour
     {
         // Initialize UI - Start with gameplay visible instead of main menu
         StartGame();
+        
+        // Connect UI buttons to StateManager
+        ConnectUIButtons();
     }
 
     // Optional: Add a method to initialize UI without showing any panels
@@ -482,4 +484,162 @@ public class GameUIManager : MonoBehaviour
 
     // Add this property to control whether level up panel should appear
     public bool SuppressLevelUpPanel { get; set; } = false;
+
+    // Add this new method to show a notification when a special move is performed
+    public void ShowSpecialMoveNotification(int points)
+    {
+        // Create and show a temporary notification
+        StartCoroutine(ShowPopupNotification($"SPECIAL! +{points} POINTS", Color.yellow));
+    }
+
+    // Helper method to show popup notifications
+    private IEnumerator ShowPopupNotification(string message, Color color)
+    {
+        // Create a temporary UI text element if it doesn't exist
+        GameObject notificationObj = GameObject.Find("SpecialMoveNotification");
+        if (notificationObj == null)
+        {
+            notificationObj = new GameObject("SpecialMoveNotification");
+            notificationObj.transform.SetParent(transform);
+            
+            // Add a text component
+            UnityEngine.UI.Text textComponent = notificationObj.AddComponent<UnityEngine.UI.Text>();
+            textComponent.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            textComponent.fontSize = 36;
+            textComponent.alignment = TextAnchor.MiddleCenter;
+            
+            // Position in the center of the screen
+            RectTransform rectTransform = notificationObj.GetComponent<RectTransform>();
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.sizeDelta = new Vector2(400, 100);
+            rectTransform.anchoredPosition = new Vector2(0, 100); // Position above center
+        }
+        
+        // Set the text and color
+        UnityEngine.UI.Text text = notificationObj.GetComponent<UnityEngine.UI.Text>();
+        if (text != null)
+        {
+            text.text = message;
+            text.color = color;
+        }
+        
+        // Activate the notification
+        notificationObj.SetActive(true);
+        
+        // Animation: Fade in, wait, fade out
+        float fadeInTime = 0.3f;
+        float displayTime = 1.5f;
+        float fadeOutTime = 0.5f;
+        
+        // Fade in
+        float elapsed = 0f;
+        while (elapsed < fadeInTime)
+        {
+            if (text != null)
+            {
+                Color newColor = text.color;
+                newColor.a = Mathf.Lerp(0, 1, elapsed / fadeInTime);
+                text.color = newColor;
+            }
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Ensure fully visible
+        if (text != null)
+        {
+            Color fullColor = text.color;
+            fullColor.a = 1f;
+            text.color = fullColor;
+        }
+        
+        // Display duration
+        yield return new WaitForSeconds(displayTime);
+        
+        // Fade out
+        elapsed = 0f;
+        while (elapsed < fadeOutTime)
+        {
+            if (text != null)
+            {
+                Color newColor = text.color;
+                newColor.a = Mathf.Lerp(1, 0, elapsed / fadeOutTime);
+                text.color = newColor;
+            }
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Hide the notification
+        notificationObj.SetActive(false);
+    }
+
+    // Add this new method to connect UI buttons to StateManager
+    private void ConnectUIButtons()
+    {
+        // Find all UI buttons and connect them to the StateManager
+        if (StateManager.Instance != null)
+        {
+            Debug.Log("Connecting UI buttons to StateManager");
+            
+            // Connect pause button
+            Button pauseButton = FindButtonInUI("PauseButton");
+            if (pauseButton != null)
+            {
+                pauseButton.onClick.AddListener(() => StateManager.Instance.ChangeState(StateManager.GameStateType.Paused));
+            }
+            
+            // Connect resume button
+            Button resumeButton = FindButtonInUI("ResumeButton");
+            if (resumeButton != null)
+            {
+                resumeButton.onClick.AddListener(() => StateManager.Instance.ChangeState(StateManager.GameStateType.Playing));
+            }
+            
+            // Connect menu buttons
+            Button mainMenuButton = FindButtonInUI("MainMenuButton");
+            if (mainMenuButton != null)
+            {
+                mainMenuButton.onClick.AddListener(() => StateManager.Instance.ChangeState(StateManager.GameStateType.MainMenu));
+            }
+            
+            Button playButton = FindButtonInUI("PlayButton");
+            if (playButton != null)
+            {
+                playButton.onClick.AddListener(() => StateManager.Instance.ChangeState(StateManager.GameStateType.Playing));
+            }
+            
+            // Connect continue button in level up panel
+            if (continueButton != null)
+            {
+                LevelTransitionState levelTransitionState = StateManager.Instance.GetState(StateManager.GameStateType.LevelTransition) as LevelTransitionState;
+                if (levelTransitionState != null)
+                {
+                    continueButton.onClick.RemoveAllListeners();
+                    continueButton.onClick.AddListener(levelTransitionState.OnContinueClicked);
+                    Debug.Log("Connected continue button to LevelTransitionState");
+                }
+            }
+        }
+        else
+        {
+            Debug.LogWarning("StateManager.Instance is null, cannot connect UI buttons");
+        }
+    }
+
+    // Helper method to find buttons in the UI
+    private Button FindButtonInUI(string buttonName)
+    {
+        Button[] allButtons = FindObjectsOfType<Button>(true);
+        foreach (Button button in allButtons)
+        {
+            if (button.name == buttonName || button.gameObject.name == buttonName)
+            {
+                return button;
+            }
+        }
+        return null;
+    }
 }

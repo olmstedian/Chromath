@@ -6,7 +6,6 @@ public class TileManager : MonoBehaviour
 {
     [Header("Tile References")]
     [SerializeField] private GameObject gameTilePrefab;
-    [SerializeField] private GameObject obstacleTilePrefab; // Add reference to obstacle prefab
     [SerializeField] private Board boardManager;
     
     [Header("Tile Settings")]
@@ -16,6 +15,8 @@ public class TileManager : MonoBehaviour
     // Tile tracking
     private Dictionary<Vector2Int, GameObject> tilePositions = new Dictionary<Vector2Int, GameObject>();
     private Dictionary<GameObject, Vector2Int> tilesToPositions = new Dictionary<GameObject, Vector2Int>();
+    // Add the missing physicsTiles dictionary
+    private Dictionary<Vector2Int, GameObject> physicsTiles = new Dictionary<Vector2Int, GameObject>();
     
     // Object pooling
     private Queue<GameObject> redTilePool = new Queue<GameObject>();
@@ -31,7 +32,6 @@ public class TileManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -44,8 +44,40 @@ public class TileManager : MonoBehaviour
     {
         if (boardManager == null)
             boardManager = FindObjectOfType<Board>();
+        
+        if (boardManager == null)
+        {
+            Debug.LogError("TileManager could not find Board reference! Tiles cannot be placed.");
+            return;
+        }
             
         InitializeTilePools();
+        
+        // Debug log to ensure TileManager started properly
+        Debug.Log($"TileManager initialized with board: {boardManager.name}, dimensions: {boardManager.rows}x{boardManager.columns}");
+        
+        // Test tile generation on startup
+        if (GameManager.Instance == null) // Only do this if GameManager isn't handling it
+        {
+            StartCoroutine(GenerateTestTile());
+        }
+    }
+
+    // Add this method to allow Board to notify TileManager when it's ready
+    public void OnBoardReady(Board board)
+    {
+        boardManager = board;
+        Debug.Log("TileManager received board ready notification");
+    }
+
+    private IEnumerator GenerateTestTile()
+    {
+        // Wait a bit to ensure the board is fully set up
+        yield return new WaitForSeconds(0.5f);
+        
+        // Generate a test tile to verify functionality
+        GenerateRandomTile();
+        Debug.Log("Generated test tile to verify TileManager is working");
     }
     
     #region Tile Pool Management
@@ -179,6 +211,12 @@ public class TileManager : MonoBehaviour
     
     public GameObject CreateTileAt(Vector2Int gridPosition, GameTile.TileColor color)
     {
+        if (boardManager == null)
+        {
+            Debug.LogError("Cannot create tile - Board reference is missing!");
+            return null;
+        }
+        
         if (IsTileAt(gridPosition))
         {
             Debug.LogWarning($"Tile already exists at position {gridPosition}");
@@ -195,12 +233,12 @@ public class TileManager : MonoBehaviour
         tile.transform.position = worldPosition;
         tile.transform.SetParent(boardManager.transform);
         
-        // Set the tile's scale
-        tile.transform.localScale = new Vector3(boardManager.tileSize, boardManager.tileSize, 1f);
-        
         // Ensure proper z-position to be above the board
         Vector3 pos = tile.transform.position;
         tile.transform.position = new Vector3(pos.x, pos.y, -0.1f);
+        
+        // Set the tile's scale based on board's tileSize
+        tile.transform.localScale = new Vector3(boardManager.tileSize, boardManager.tileSize, 1f);
         
         // Track the tile
         tilePositions[gridPosition] = tile;
@@ -220,34 +258,43 @@ public class TileManager : MonoBehaviour
             tileComponent.SetMovable(true);
         }
         
+        // Log successful tile creation
+        Debug.Log($"Successfully created tile at grid position {gridPosition}, world position {worldPosition}");
+        
         return tile;
     }
     
-    private Vector3 GetWorldPositionFromGrid(Vector2Int gridPosition)
+    // Helper method to get all tile positions on the board
+    public List<Vector2Int> GetAllTilePositions()
     {
-        float boardWidth = (boardManager.columns - 1) * boardManager.tileSpacing;
-        float boardHeight = (boardManager.rows - 1) * boardManager.tileSpacing;
-        
-        float startX = -boardWidth / 2;
-        float startY = -boardHeight / 2;
-        
-        return new Vector3(
-            startX + (gridPosition.x * boardManager.tileSpacing), 
-            startY + (gridPosition.y * boardManager.tileSpacing), 
-            0
-        );
+        return new List<Vector2Int>(tilePositions.Keys);
     }
-    
+
+    // Helper method to get world position from grid position
+    public Vector3 GetWorldPositionFromGrid(Vector2Int gridPosition)
+    {
+        if (boardManager == null)
+        {
+            Debug.LogError("Board reference is missing in TileManager!");
+            return Vector3.zero;
+        }
+
+        // Use Board's built-in method to get the world position
+        return boardManager.GetWorldPosition(gridPosition);
+    }
+
     private Vector2Int GetGridPositionFromWorld(Vector3 worldPosition)
     {
-        float boardWidth = (boardManager.columns - 1) * boardManager.tileSpacing;
-        float boardHeight = (boardManager.rows - 1) * boardManager.tileSpacing;
-        
-        float startX = -boardWidth / 2;
-        float startY = -boardHeight / 2;
-        
-        int gridX = Mathf.RoundToInt((worldPosition.x - startX) / boardManager.tileSpacing);
-        int gridY = Mathf.RoundToInt((worldPosition.y - startY) / boardManager.tileSpacing);
+        if (boardManager == null)
+        {
+            Debug.LogError("Board reference is missing in TileManager!");
+            return Vector2Int.zero;
+        }
+
+        // Calculate grid position using the board's properties
+        float tileSpacing = boardManager.tileSpacing;
+        int gridX = Mathf.RoundToInt((worldPosition.x - boardManager.boardStartX) / tileSpacing);
+        int gridY = Mathf.RoundToInt((worldPosition.y - boardManager.boardStartY) / tileSpacing);
         
         return new Vector2Int(gridX, gridY);
     }
@@ -324,6 +371,7 @@ public class TileManager : MonoBehaviour
             }
             else
             {
+                // Get GameTile components to check for same color
                 GameTile movingGameTile = tile.GetComponent<GameTile>();
                 GameTile targetGameTile = targetTile.GetComponent<GameTile>();
                 
@@ -341,7 +389,15 @@ public class TileManager : MonoBehaviour
                     targetGameTile.SetValue(newValue);
                     
                     // Play merge animation
-                    StartCoroutine(MergeTileAnimation(targetTile));
+                    if (TileAnimationManager.Instance != null)
+                    {
+                        StartCoroutine(TileAnimationManager.Instance.MergeTileAnimation(targetTile));
+                    }
+                    else
+                    {
+                        // Direct animation fallback if TileAnimationManager is unavailable
+                        Debug.LogWarning("TileAnimationManager not available for merge animation");
+                    }
                     
                     // Return the moving tile to the pool
                     ReturnTileToPool(tile);
@@ -365,7 +421,44 @@ public class TileManager : MonoBehaviour
                 }
                 else
                 {
-                    Debug.LogWarning($"Cannot move to position {newGridPosition} - already occupied by {tilePositions[newGridPosition].name}");
+                    // Instead of just warning, let's look for an alternate direction to move the tile
+                    Debug.LogWarning($"Cannot move to position {newGridPosition} - already occupied by {targetTile.name}. Trying to find alternate path...");
+                    
+                    // Try adjacent positions if they're free
+                    Vector2Int[] alternateDirections = new Vector2Int[]
+                    {
+                        Vector2Int.up,
+                        Vector2Int.right,
+                        Vector2Int.down,
+                        Vector2Int.left
+                    };
+                    
+                    // The direction we were trying to move
+                    Vector2Int attemptedDirection = newGridPosition - oldGridPosition;
+                    
+                    // Try the perpendicular directions first (most intuitive for player)
+                    foreach (Vector2Int dir in alternateDirections)
+                    {
+                        // Skip the direction we already tried
+                        if (dir == attemptedDirection) continue;
+                        
+                        // Skip the opposite direction (would be confusing)
+                        if (dir == -attemptedDirection) continue;
+                        
+                        Vector2Int alternatePosition = oldGridPosition + dir;
+                        
+                        // Check if the position is valid
+                        if (alternatePosition.x >= 0 && alternatePosition.x < boardManager.columns &&
+                            alternatePosition.y >= 0 && alternatePosition.y < boardManager.rows &&
+                            !tilePositions.ContainsKey(alternatePosition))
+                        {
+                            // Found a free adjacent position - use it instead
+                            Debug.Log($"Found alternate movement path to {alternatePosition}");
+                            return MoveTile(tile, alternatePosition);
+                        }
+                    }
+                    
+                    // If no alternate path, return false
                     return false;
                 }
             }
@@ -391,7 +484,23 @@ public class TileManager : MonoBehaviour
             
             // Move the tile
             Vector3 newWorldPosition = GetWorldPositionFromGrid(newGridPosition);
-            StartCoroutine(MoveTileAnimation(tile, newWorldPosition));
+            
+            // Use TileAnimationManager instead of local coroutine
+            if (TileAnimationManager.Instance != null)
+            {
+                StartCoroutine(TileAnimationManager.Instance.MoveTileAnimation(tile, newWorldPosition));
+            }
+            else
+            {
+                // Fallback to direct position change if animation manager not available
+                tile.transform.position = newWorldPosition;
+                
+                // Still notify GameManager
+                if (GameManager.Instance != null)
+                {
+                    GameManager.Instance.OnTileMovementComplete();
+                }
+            }
             
             return true;
         }
@@ -402,70 +511,7 @@ public class TileManager : MonoBehaviour
         }
     }
     
-    // Animation for merging tiles
-    private IEnumerator MergeTileAnimation(GameObject tile)
-    {
-        // Scale up and down animation
-        Vector3 originalScale = tile.transform.localScale;
-        Vector3 expandedScale = originalScale * 1.2f;
-        
-        // Scale up
-        float duration = 0.1f;
-        float elapsed = 0;
-        
-        while (elapsed < duration)
-        {
-            tile.transform.localScale = Vector3.Lerp(originalScale, expandedScale, elapsed / duration);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Scale back down
-        elapsed = 0;
-        while (elapsed < duration)
-        {
-            tile.transform.localScale = Vector3.Lerp(expandedScale, originalScale, elapsed / duration);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Ensure final scale is correct
-        tile.transform.localScale = originalScale;
-    }
-    
-    private IEnumerator MoveTileAnimation(GameObject tile, Vector3 targetPosition)
-    {
-        TileMovement tileMovement = tile.GetComponent<TileMovement>();
-        if (tileMovement != null)
-        {
-            Vector3 startPos = tile.transform.position;
-            float moveTime = 0.2f;
-            float elapsedTime = 0;
-            
-            while (elapsedTime < moveTime)
-            {
-                tile.transform.position = Vector3.Lerp(startPos, targetPosition, elapsedTime / moveTime);
-                elapsedTime += Time.deltaTime;
-                yield return null;
-            }
-            
-            // Ensure tile ends at exact position
-            tile.transform.position = new Vector3(targetPosition.x, targetPosition.y, tile.transform.position.z);
-        }
-        else
-        {
-            // Fallback if no TileMovement component
-            tile.transform.position = new Vector3(targetPosition.x, targetPosition.y, tile.transform.position.z);
-        }
-        
-        // After completing movement, notify GameManager to spawn a new tile
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.OnTileMovementComplete();
-        }
-    }
-    
-    // NEW METHOD: Check for and process chain merges after an initial merge - with improved safety
+    // Check for and process chain merges - replace with animation manager calls
     private IEnumerator CheckForChainMergesCoroutine(Vector2Int position, GameTile.TileColor color)
     {
         // Wait a short time before checking for chain merges to let animations complete
@@ -554,8 +600,12 @@ public class TileManager : MonoBehaviour
                     tilePositions.Remove(pos);
                     tilesToPositions.Remove(tileToRemove);
                     
-                    // Animate movement to the merged position
-                    StartCoroutine(AnimateTileToMerge(tileToRemove, GetWorldPositionFromGrid(position)));
+                    // Animate movement to the merged position using TileAnimationManager
+                    if (TileAnimationManager.Instance != null)
+                    {
+                        StartCoroutine(TileAnimationManager.Instance.AnimateTileToMerge(
+                            tileToRemove, GetWorldPositionFromGrid(position)));
+                    }
                     
                     // Small delay for visual effect
                     yield return new WaitForSeconds(0.1f);
@@ -576,8 +626,11 @@ public class TileManager : MonoBehaviour
                     targetTile.MakeSpecial(specialType);
                 }
                 
-                // Apply visual effect for special tile creation
-                StartCoroutine(SpecialTileCreationEffect(tilePositions[position]));
+                // Apply visual effect for special tile creation using TileAnimationManager
+                if (TileAnimationManager.Instance != null && tilePositions.ContainsKey(position) && tilePositions[position] != null)
+                {
+                    StartCoroutine(TileAnimationManager.Instance.SpecialTileCreationEffect(tilePositions[position]));
+                }
             }
             else
             {
@@ -586,9 +639,9 @@ public class TileManager : MonoBehaviour
             }
             
             // Play merge animation on the target tile if it still exists
-            if (tilePositions.ContainsKey(position) && tilePositions[position] != null)
+            if (TileAnimationManager.Instance != null && tilePositions.ContainsKey(position) && tilePositions[position] != null)
             {
-                StartCoroutine(MergeTileAnimation(tilePositions[position]));
+                StartCoroutine(TileAnimationManager.Instance.MergeTileAnimation(tilePositions[position]));
             }
             
             // Notify score manager about the chain merge
@@ -602,27 +655,6 @@ public class TileManager : MonoBehaviour
         }
     }
     
-    // NEW METHOD: Animate a tile moving to merge with another tile
-    private IEnumerator AnimateTileToMerge(GameObject tile, Vector3 targetPosition)
-    {
-        Vector3 startPosition = tile.transform.position;
-        float elapsedTime = 0f;
-        float mergeDuration = 0.2f;
-        
-        while (elapsedTime < mergeDuration)
-        {
-            tile.transform.position = Vector3.Lerp(startPosition, targetPosition, elapsedTime / mergeDuration);
-            elapsedTime += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Make sure the tile ends at the exact target position
-        tile.transform.position = targetPosition;
-        
-        // Return the tile to the pool after it reaches the target
-        ReturnTileToPool(tile);
-    }
-
     // Determine what kind of special tile to create based on merge pattern
     private SpecialTileType DetermineSpecialTileType(Vector2Int centerPos, List<Vector2Int> mergedPositions)
     {
@@ -661,7 +693,7 @@ public class TileManager : MonoBehaviour
         {
             return SpecialTileType.ColumnClear;
         }
-        else if (mergedPositions.Count >= 4) 
+        else if (mergedPositions.Count >= 4)
         {
             return SpecialTileType.AreaClear;
         }
@@ -672,34 +704,6 @@ public class TileManager : MonoBehaviour
         }
     }
 
-    // Visual effect for special tile creation
-    private IEnumerator SpecialTileCreationEffect(GameObject tile)
-    {
-        // Save original scale
-        Vector3 originalScale = tile.transform.localScale;
-        
-        // Pulse effect
-        for (int i = 0; i < 2; i++)
-        {
-            // Scale up
-            float duration = 0.15f;
-            float elapsed = 0f;
-            
-            while (elapsed < duration)
-            {
-                float scale = 1.0f + 0.3f * Mathf.Sin(elapsed / duration * Mathf.PI);
-                tile.transform.localScale = originalScale * scale;
-                elapsed += Time.unscaledDeltaTime;
-                yield return null;
-            }
-        }
-        
-        // Ensure final scale is correct
-        tile.transform.localScale = originalScale;
-        
-        // Add particles or other effects here
-    }
-    
     #endregion
     
     #region Tile Merging and Matching
@@ -913,29 +917,27 @@ public class TileManager : MonoBehaviour
         // Final safety check - clear dictionaries completely in case something was missed
         tilePositions.Clear();
         tilesToPositions.Clear();
+        
+        // Add a Physics2D sync to ensure everything is cleaned up
+        Physics2D.SyncTransforms();
     }
-
+    
     // Helper method to safely get grid position even for objects not precisely aligned
     private Vector2Int? GetGridPositionFromWorldSafe(Vector3 worldPosition)
     {
         if (boardManager == null) return null;
         
-        float boardWidth = (boardManager.columns - 1) * boardManager.tileSpacing;
-        float boardHeight = (boardManager.rows - 1) * boardManager.tileSpacing;
-        
-        float startX = -boardWidth / 2;
-        float startY = -boardHeight / 2;
-        
-        // Use a tolerance value to account for slight positioning errors
-        float tolerance = boardManager.tileSpacing * 0.25f;
+        // Use board's properties for consistent calculations
+        float tileSpacing = boardManager.tileSpacing;
+        float tolerance = tileSpacing * 0.25f;
         
         // Try to find the closest grid position
         for (int col = 0; col < boardManager.columns; col++)
         {
             for (int row = 0; row < boardManager.rows; row++)
             {
-                float gridX = startX + (col * boardManager.tileSpacing);
-                float gridY = startY + (row * boardManager.tileSpacing);
+                float gridX = boardManager.boardStartX + (col * tileSpacing);
+                float gridY = boardManager.boardStartY + (row * tileSpacing);
                 
                 if (Mathf.Abs(worldPosition.x - gridX) < tolerance && 
                     Mathf.Abs(worldPosition.y - gridY) < tolerance)
@@ -961,7 +963,18 @@ public class TileManager : MonoBehaviour
             if (tilePositions.TryGetValue(pos, out GameObject tile))
             {
                 // Animate the tile shrinking away
-                StartCoroutine(ScaleTileOut(tile, pos));
+                if (TileAnimationManager.Instance != null)
+                {
+                    StartCoroutine(TileAnimationManager.Instance.ScaleTileOut(tile));
+                    
+                    // Make sure to remove the tile after animation completes
+                    StartCoroutine(RemoveTileAfterDelay(pos, 0.3f)); // Match the animation duration
+                }
+                else
+                {
+                    // Direct removal if TileAnimationManager is unavailable
+                    RemoveTileAt(pos);
+                }
                 
                 // Small delay between tiles for wave effect
                 yield return new WaitForSeconds(0.05f);
@@ -969,37 +982,38 @@ public class TileManager : MonoBehaviour
         }
     }
 
-    // Animation for removing tiles
-    private IEnumerator ScaleTileOut(GameObject tile, Vector2Int position)
+    // Add a helper method to remove tiles after animation completes
+    private IEnumerator RemoveTileAfterDelay(Vector2Int position, float delay)
     {
-        if (tile == null) yield break;
-        
-        Vector3 originalScale = tile.transform.localScale;
-        float duration = 0.2f;
-        float elapsed = 0;
-        
-        // Scale down to nothing
-        while (elapsed < duration)
-        {
-            if (tile == null) yield break;
-            
-            float t = elapsed / duration;
-            tile.transform.localScale = Vector3.Lerp(originalScale, Vector3.zero, t);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Now actually remove the tile from the board
+        yield return new WaitForSeconds(delay);
         RemoveTileAt(position);
     }
-    
+
     public void GenerateRandomTile()
     {
+        if (boardManager == null)
+        {
+            Debug.LogError("Cannot generate tile - Board reference is missing in TileManager!");
+            return;
+        }
+        
         // Find an empty spot on the board
         List<Vector2Int> emptyPositions = new List<Vector2Int>();
         
-        // Reduce debug log verbosity to just the essentials
         Debug.Log($"Finding empty positions for new tile. Board size: {boardManager.rows}x{boardManager.columns}");
+        
+        // Make sure the board dimensions are valid
+        if (boardManager.rows <= 0 || boardManager.columns <= 0)
+        {
+            Debug.LogError($"Invalid board dimensions: {boardManager.rows}x{boardManager.columns}");
+            return;
+        }
+        
+        // First, run a full validation to fix any inconsistencies before generating a new tile
+        ValidateAllTilePositions();
+        
+        // Clear physicsTiles dictionary before use to avoid stale data
+        physicsTiles.Clear();
         
         for (int row = 0; row < boardManager.rows; row++)
         {
@@ -1008,17 +1022,48 @@ public class TileManager : MonoBehaviour
                 Vector2Int position = new Vector2Int(col, row);
                 if (!tilePositions.ContainsKey(position))
                 {
+                    // Check for obstacles as well (NEW)
+                    if (ObstacleManager.Instance != null && ObstacleManager.Instance.IsObstacleAt(position))
+                    {
+                        continue; // Skip positions with obstacles
+                    }
+                    
                     // Extra verification: physically check for overlap
                     bool positionClear = true;
                     Vector3 worldPos = GetWorldPositionFromGrid(position);
-                    Collider2D[] colliders = Physics2D.OverlapCircleAll(new Vector2(worldPos.x, worldPos.y), 0.1f);
+                    Collider2D[] colliders = Physics2D.OverlapCircleAll(new Vector2(worldPos.x, worldPos.y), 0.2f);
                     
                     foreach (Collider2D collider in colliders)
                     {
                         if (collider.GetComponent<GameTile>() != null)
                         {
                             positionClear = false;
-                            Debug.LogWarning($"Found tile at {position} through physics check that wasn't in dictionary!");
+                            GameObject foundTile = collider.gameObject;
+                            physicsTiles[position] = foundTile;
+                            
+                            // Don't log a warning here, just fix it silently
+                            // Only if we're sure it's not tracked elsewhere (avoid duplicates)
+                            if (!tilesToPositions.ContainsKey(foundTile))
+                            {
+                                SyncPhysicsTileToDictionary(foundTile, position);
+                            }
+                            else
+                            {
+                                // The tile is tracked, but at a different position - possible conflict
+                                Vector2Int currentTrackedPos = tilesToPositions[foundTile];
+                                if (currentTrackedPos != position)
+                                {
+                                    Debug.Log($"Fixing mismatch: Tile is physically at {position} but was tracked at {currentTrackedPos}");
+                                    // Remove the tile from its old tracked position
+                                    if (tilePositions.ContainsKey(currentTrackedPos) && tilePositions[currentTrackedPos] == foundTile)
+                                    {
+                                        tilePositions.Remove(currentTrackedPos);
+                                    }
+                                    // Update to the new position
+                                    tilePositions[position] = foundTile;
+                                    tilesToPositions[foundTile] = position;
+                                }
+                            }
                             break;
                         }
                     }
@@ -1029,6 +1074,12 @@ public class TileManager : MonoBehaviour
                     }
                 }
             }
+        }
+        
+        // If we found inconsistencies, let's try to resolve them
+        if (physicsTiles.Count > 0)
+        {
+            Debug.Log($"Fixed {physicsTiles.Count} dictionary inconsistencies before generating new tile");
         }
         
         if (emptyPositions.Count == 0)
@@ -1045,6 +1096,18 @@ public class TileManager : MonoBehaviour
         {
             Debug.LogError($"CRITICAL ERROR: Position {randomPosition} is already occupied in dictionary!");
             return;
+        }
+        
+        // Double check with physics system one more time
+        Vector3 spawnWorldPos = GetWorldPositionFromGrid(randomPosition);
+        Collider2D[] finalCheck = Physics2D.OverlapCircleAll(new Vector2(spawnWorldPos.x, spawnWorldPos.y), 0.2f);
+        foreach (Collider2D collider in finalCheck)
+        {
+            if (collider.GetComponent<GameTile>() != null)
+            {
+                Debug.LogError($"Physics system detected a tile at {randomPosition} right before spawning! Aborting spawn.");
+                return;
+            }
         }
         
         // Keep this log for tracking tile spawning
@@ -1071,106 +1134,272 @@ public class TileManager : MonoBehaviour
                 Debug.Log($"Created {randomColor} tile with value {randomValue} at position {randomPosition}");
             }
             
-            StartCoroutine(ScaleTileIn(newTile));
+            // Use new animation manager for scaling in
+            if (TileAnimationManager.Instance != null)
+            {
+                StartCoroutine(TileAnimationManager.Instance.ScaleTileIn(newTile));
+            }
         }
         else
         {
             Debug.LogError($"Failed to create tile at position {randomPosition}");
         }
     }
-    
-    private IEnumerator ScaleTileIn(GameObject tile)
-    {
-        // Start with a tiny scale
-        Vector3 originalScale = tile.transform.localScale;
-        tile.transform.localScale = originalScale * 0.1f;
-        
-        float duration = 0.3f;
-        float elapsed = 0;
-        
-        // Scale up to normal size
-        while (elapsed < duration)
-        {
-            float t = elapsed / duration;
-            tile.transform.localScale = Vector3.Lerp(originalScale * 0.1f, originalScale, t);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Ensure final scale is correct
-        tile.transform.localScale = originalScale;
-    }
 
-    // Create a method to spawn obstacle tiles
-    public GameObject CreateObstacleTileAt(Vector2Int gridPosition)
+    // Enhanced version of SyncPhysicsTileToDictionary to be more thorough
+    private void SyncPhysicsTileToDictionary(GameObject tile, Vector2Int position)
     {
-        if (IsTileAt(gridPosition))
+        if (tile == null) return;
+        
+        // First, check if this tile is already tracked somewhere else
+        Vector2Int? existingPosition = null;
+        if (tilesToPositions.TryGetValue(tile, out Vector2Int pos))
         {
-            Debug.LogWarning($"Tile already exists at position {gridPosition}");
-            return null;
+            existingPosition = pos;
         }
         
-        // Instantiate the obstacle tile
-        Vector3 worldPosition = GetWorldPositionFromGrid(gridPosition);
-        GameObject obstacleTile = Instantiate(obstacleTilePrefab, worldPosition, Quaternion.identity, boardManager.transform);
-        
-        // Set the scale
-        obstacleTile.transform.localScale = new Vector3(boardManager.tileSize, boardManager.tileSize, 1f);
-        
-        // Ensure proper z-position to be above the board
-        Vector3 pos = obstacleTile.transform.position;
-        obstacleTile.transform.position = new Vector3(pos.x, pos.y, -0.1f);
-        
-        // Track the tile
-        tilePositions[gridPosition] = obstacleTile;
-        tilesToPositions[obstacleTile] = gridPosition;
-        
-        // Make sure the sprite renderer has a high sorting order
-        SpriteRenderer renderer = obstacleTile.GetComponent<SpriteRenderer>();
-        if (renderer != null)
+        // Check if this position is already occupied in the dictionary
+        GameObject existingTileAtPosition = null;
+        if (tilePositions.TryGetValue(position, out GameObject tileAtPos))
         {
-            renderer.sortingOrder = 10;
+            existingTileAtPosition = tileAtPos;
         }
         
-        Debug.Log($"Created obstacle tile at position {gridPosition}");
-        
-        return obstacleTile;
-    }
-
-    // Add a method to generate a random obstacle tile
-    public void GenerateRandomObstacleTile()
-    {
-        // Find an empty spot on the board
-        List<Vector2Int> emptyPositions = new List<Vector2Int>();
-        
-        for (int row = 0; row < boardManager.rows; row++)
+        // Case 1: Tile already tracked elsewhere, position has different tile
+        if (existingPosition.HasValue && existingTileAtPosition != null && existingTileAtPosition != tile)
         {
-            for (int col = 0; col < boardManager.columns; col++)
+            // This is a complex conflict situation
+            Debug.Log($"Complex conflict: Tile {tile.name} tracked at {existingPosition.Value} but detected at {position}, which has {existingTileAtPosition.name}");
+            
+            // First, determine which scenario is physically correct
+            Vector3 positionWorldSpace = GetWorldPositionFromGrid(position);
+            Vector3 existingPosWorldSpace = GetWorldPositionFromGrid(existingPosition.Value);
+            
+            // Check tile's actual position
+            Vector3 tileActualPos = tile.transform.position;
+            float distToPosition = Vector3.Distance(tileActualPos, positionWorldSpace);
+            float distToExistingPos = Vector3.Distance(tileActualPos, existingPosWorldSpace);
+            
+            // Trust physics - the tile is physically closer to 'position'
+            if (distToPosition < distToExistingPos)
             {
-                Vector2Int position = new Vector2Int(col, row);
-                if (!tilePositions.ContainsKey(position))
+                Debug.Log($"Trusting physics: Tile is closer to {position} than {existingPosition.Value}");
+                
+                // Remove tile from old position
+                tilePositions.Remove(existingPosition.Value);
+                
+                // Dispose of the other tile that was wrongly at this position
+                if (existingTileAtPosition != null)
                 {
-                    emptyPositions.Add(position);
+                    tilesToPositions.Remove(existingTileAtPosition);
+                    ReturnTileToPool(existingTileAtPosition);
+                }
+                
+                // Update tracking for this tile
+                tilePositions[position] = tile;
+                tilesToPositions[tile] = position;
+            }
+            else
+            {
+                // Trust existing tracking - leave tile where it is in the dictionary
+                // Just fix the position of the existing tile if needed
+                if (existingTileAtPosition != null)
+                {
+                    existingTileAtPosition.transform.position = positionWorldSpace;
+                }
+            }
+        }
+        // Case 2: Tile already tracked, but position is empty
+        else if (existingPosition.HasValue && existingTileAtPosition == null)
+        {
+            // Double check if the tile is actually closer to this position
+            Vector3 positionWorldSpace = GetWorldPositionFromGrid(position);
+            Vector3 existingPosWorldSpace = GetWorldPositionFromGrid(existingPosition.Value);
+            
+            // Check which one is closer to the tile's actual position
+            float distToPosition = Vector3.Distance(tile.transform.position, positionWorldSpace);
+            float distToExistingPos = Vector3.Distance(tile.transform.position, existingPosWorldSpace);
+            
+            if (distToPosition < distToExistingPos)
+            {
+                // Update tracking to the new position
+                tilePositions.Remove(existingPosition.Value);
+                tilePositions[position] = tile;
+                tilesToPositions[tile] = position;
+                Debug.Log($"Moved tile tracking from {existingPosition.Value} to {position} based on physics detection");
+            }
+        }
+        // Case 3: Tile not tracked, position already has a different tile
+        else if (!existingPosition.HasValue && existingTileAtPosition != null && existingTileAtPosition != tile)
+        {
+            // Check which tile is actually at this position physically
+            Vector3 positionWorldSpace = GetWorldPositionFromGrid(position);
+            float distTileToPos = Vector3.Distance(tile.transform.position, positionWorldSpace);
+            float distExistingTileToPos = Vector3.Distance(existingTileAtPosition.transform.position, positionWorldSpace);
+            
+            if (distTileToPos < distExistingTileToPos)
+            {
+                // The new tile is actually closer to this position, update tracking
+                tilesToPositions.Remove(existingTileAtPosition);
+                tilePositions[position] = tile;
+                tilesToPositions[tile] = position;
+                Debug.Log($"Replaced tracked tile at {position} based on physics detection");
+            }
+        }
+        // Case 4: Tile not tracked, position is empty
+        else if (!existingPosition.HasValue && existingTileAtPosition == null)
+        {
+            // Simple case - just add the tile to tracking
+            tilePositions[position] = tile;
+            tilesToPositions[tile] = position;
+            Debug.Log($"Added untracked tile at {position} to dictionary based on physics");
+        }
+        // Case 5: Tile is tracked at this position already
+        else if (existingPosition.HasValue && existingPosition.Value == position && existingTileAtPosition == tile)
+        {
+            // Everything is correct, do nothing
+        }
+    }
+
+    // Add a more comprehensive validation method
+    public void ValidateAllTilePositions()
+    {
+        Debug.Log("Performing full tile position validation...");
+        
+        // First, sync the physics state to ensure accurate collision detection
+        Physics2D.SyncTransforms();
+        
+        // Temporary dictionaries to store corrected data
+        Dictionary<Vector2Int, GameObject> validatedPositions = new Dictionary<Vector2Int, GameObject>();
+        Dictionary<GameObject, Vector2Int> validatedTiles = new Dictionary<GameObject, Vector2Int>();
+        
+        // Track tiles that need to be returned to the pool
+        List<GameObject> tilesToReturnToPool = new List<GameObject>();
+        
+        // Find all game tiles in the scene
+        GameTile[] allTiles = FindObjectsOfType<GameTile>();
+        int fixedCount = 0;
+        
+        foreach (GameTile tile in allTiles)
+        {
+            if (tile == null || tile.gameObject == null) continue;
+            
+            // Get current world position
+            Vector3 worldPos = tile.transform.position;
+            
+            // Convert to grid position
+            Vector2Int gridPos = GetGridPositionFromWorld(worldPos);
+            
+            // Check if this position is already claimed in our new validated dictionary
+            if (validatedPositions.TryGetValue(gridPos, out GameObject existingTile))
+            {
+                // Conflict - two tiles at same position
+                Debug.LogWarning($"Found two tiles at position {gridPos}: {tile.name} and {existingTile.name}");
+                
+                // Keep the one with the highest value or if values are equal, keep one randomly
+                GameTile existingGameTile = existingTile.GetComponent<GameTile>();
+                if (existingGameTile != null && tile.TileValue < existingGameTile.TileValue)
+                {
+                    // Keep existing tile, return this one to pool
+                    tilesToReturnToPool.Add(tile.gameObject);
+                }
+                else
+                {
+                    // Keep new tile, return existing to pool
+                    validatedPositions[gridPos] = tile.gameObject;
+                    validatedTiles[tile.gameObject] = gridPos;
+                    tilesToReturnToPool.Add(existingTile);
+                    validatedTiles.Remove(existingTile);
+                    fixedCount++;
+                }
+            }
+            else
+            {
+                // Position is free, add this tile
+                validatedPositions[gridPos] = tile.gameObject;
+                validatedTiles[tile.gameObject] = gridPos;
+                
+                // Check if this resolves an inconsistency
+                bool wasInconsistent = true;
+                
+                // Check if the tile was previously tracked
+                if (tilesToPositions.TryGetValue(tile.gameObject, out Vector2Int oldPos))
+                {
+                    // Check if it was at a different position
+                    if (oldPos != gridPos)
+                    {
+                        Debug.Log($"Fixed position for {tile.name}: {oldPos} -> {gridPos}");
+                        fixedCount++;
+                    }
+                    else
+                    {
+                        wasInconsistent = false;
+                    }
+                }
+                // Or if the position had a different tile
+                else if (tilePositions.TryGetValue(gridPos, out GameObject oldTile) && oldTile != tile.gameObject)
+                {
+                    Debug.Log($"Fixed tile at position {gridPos}: {oldTile.name} -> {tile.name}");
+                    fixedCount++;
+                }
+                // Or if neither the tile nor position was tracked
+                else if (!tilesToPositions.ContainsKey(tile.gameObject) && !tilePositions.ContainsKey(gridPos))
+                {
+                    Debug.Log($"Added untracked tile {tile.name} at position {gridPos}");
+                    fixedCount++;
+                }
+                else
+                {
+                    wasInconsistent = false;
+                }
+                
+                // Ensure tile is properly positioned at grid point
+                if (wasInconsistent)
+                {
+                    Vector3 correctWorldPos = GetWorldPositionFromGrid(gridPos);
+                    if (Vector3.Distance(tile.transform.position, correctWorldPos) > 0.1f)
+                    {
+                        tile.transform.position = new Vector3(correctWorldPos.x, correctWorldPos.y, tile.transform.position.z);
+                        Debug.Log($"Adjusted position of {tile.name} to align with grid at {gridPos}");
+                    }
                 }
             }
         }
         
-        if (emptyPositions.Count == 0)
+        // Check for tracked tiles that don't exist anymore
+        foreach (var kvp in tilesToPositions)
         {
-            Debug.LogWarning("No empty spaces for obstacle tiles!");
-            return;
+            if (kvp.Key == null || !kvp.Key.activeInHierarchy || !validatedTiles.ContainsKey(kvp.Key))
+            {
+                Debug.Log($"Found tracked tile that doesn't exist or is inactive at position {kvp.Value}");
+                fixedCount++;
+            }
         }
         
-        // Select a random empty position
-        Vector2Int randomPosition = emptyPositions[Random.Range(0, emptyPositions.Count)];
-        
-        // Create the obstacle tile
-        GameObject obstacleTile = CreateObstacleTileAt(randomPosition);
-        
-        // Add a scale-in effect
-        if (obstacleTile != null)
+        // Now return conflict tiles to pool
+        foreach (GameObject tile in tilesToReturnToPool)
         {
-            StartCoroutine(ScaleTileIn(obstacleTile));
+            ReturnTileToPool(tile);
+        }
+        
+        // Finally, replace the old dictionaries with validated ones
+        tilePositions = validatedPositions;
+        tilesToPositions = validatedTiles;
+        
+        // One final physics sync to ensure everything is up to date
+        Physics2D.SyncTransforms();
+        
+        Debug.Log($"Tile position validation complete. Fixed {fixedCount} inconsistencies.");
+    }
+
+    // Instead, add a method to coordinate with ObstacleManager
+    public void CheckForObstacleCollision(Vector2Int position)
+    {
+        // Check if there's an obstacle at this position
+        if (ObstacleManager.Instance != null && ObstacleManager.Instance.IsObstacleAt(position))
+        {
+            // Damage the obstacle
+            ObstacleManager.Instance.DamageObstacle(position);
         }
     }
     

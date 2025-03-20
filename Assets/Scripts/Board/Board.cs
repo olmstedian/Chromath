@@ -17,6 +17,10 @@ public class Board : MonoBehaviour
     public Color color1 = Color.white;
     public Color color2 = Color.black;
 
+    // Add public variables to expose board dimensions
+    [HideInInspector] public float boardStartX;
+    [HideInInspector] public float boardStartY;
+
     private void Start()
     {
         // Set the actual spacing that will be used for movement calculations
@@ -27,6 +31,15 @@ public class Board : MonoBehaviour
         columns = Mathf.Clamp(columns, 2, 10);
         
         GenerateBoard();
+        
+        // Log board generation details for debugging
+        Debug.Log($"Board generated with {rows}x{columns} dimensions, tile spacing: {tileSpacing}, tile size: {tileSize}");
+        
+        // Ensure TileManager is notified that the board is ready
+        if (TileManager.Instance != null)
+        {
+            TileManager.Instance.OnBoardReady(this);
+        }
     }
 
     // A method to rebuild the board with new dimensions
@@ -53,12 +66,29 @@ public class Board : MonoBehaviour
         float boardWidth = (columns - 1) * tileSpacing;
         float boardHeight = (rows - 1) * tileSpacing;
 
-        // No need to change localPosition - we'll position tiles relative to center instead
-        // transform.localPosition = new Vector3(-boardWidth / 2, -boardHeight / 2, 0);
-
         // Calculate the starting position offset to center the entire grid
         float startX = -boardWidth / 2;
         float startY = -boardHeight / 2;
+        
+        // Store these values for use by other scripts
+        boardStartX = startX;
+        boardStartY = startY;
+
+        // Log board dimensions for debugging
+        Debug.Log($"Board dimensions: width={boardWidth}, height={boardHeight}, startX={startX}, startY={startY}");
+
+        // Clear any existing child tiles before regenerating
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            if (Application.isEditor && !Application.isPlaying)
+            {
+                DestroyImmediate(transform.GetChild(i).gameObject);
+            }
+            else
+            {
+                Destroy(transform.GetChild(i).gameObject);
+            }
+        }
 
         for (int row = 0; row < rows; row++)
         {
@@ -99,44 +129,11 @@ public class Board : MonoBehaviour
                 // Set regular tile size
                 regularTile.transform.localScale = new Vector3(tileSize, tileSize, 1f);
 
-                // Remove the automatic GameTile creation at (0,0) since we'll now
-                // let the TileManager handle this properly with GenerateInitialTiles
-                // This prevents duplicate tiles at the same location
-                
-                /* Remove this section:
-                if (row == 0 && col == 0 && gameTilePrefab != null)
+                // Log individual tile positions for debugging - but only for the outer tiles to reduce log spam
+                if (row == 0 || row == rows-1 || col == 0 || col == columns-1)
                 {
-                    // Position slightly in front of the regular tile
-                    Vector3 gameTilePos = new Vector3(position.x, position.y, position.z - 0.1f);
-                    
-                    // Instantiate a GameTile at the first cell
-                    GameObject gameTileObject = Instantiate(gameTilePrefab, gameTilePos, Quaternion.identity, transform);
-                    
-                    // Initialize with a color
-                    GameTile gameTileScript = gameTileObject.GetComponent<GameTile>();
-                    if (gameTileScript != null)
-                    {
-                        gameTileScript.Initialize(GameTile.TileColor.Red);
-                        
-                        // Make sure the Tile component of the GameTile is set to movable
-                        Tile gameTileComponent = gameTileObject.GetComponent<Tile>();
-                        if (gameTileComponent != null)
-                        {
-                            gameTileComponent.SetMovable(true);
-                        }
-                    }
-                    
-                    // Ensure GameTile is rendered on top of regular tiles
-                    SpriteRenderer renderer = gameTileObject.GetComponent<SpriteRenderer>();
-                    if (renderer != null)
-                    {
-                        renderer.sortingOrder = 10;
-                    }
-                    
-                    // Set game tile size
-                    gameTileObject.transform.localScale = new Vector3(tileSize, tileSize, 1f);
+                    Debug.Log($"Created board tile at position {position} for grid {col},{row}");
                 }
-                */
             }
         }
     }
@@ -144,16 +141,19 @@ public class Board : MonoBehaviour
     // Add this method to help TileManager get world positions
     public Vector3 GetWorldPosition(Vector2Int gridPosition)
     {
-        float boardWidth = (columns - 1) * tileSpacing;
-        float boardHeight = (rows - 1) * tileSpacing;
+        // Ensure grid positions are within bounds
+        int x = Mathf.Clamp(gridPosition.x, 0, columns - 1);
+        int y = Mathf.Clamp(gridPosition.y, 0, rows - 1);
         
-        float startX = -boardWidth / 2;
-        float startY = -boardHeight / 2;
-        
-        return new Vector3(
-            startX + (gridPosition.x * tileSpacing), 
-            startY + (gridPosition.y * tileSpacing), 
+        Vector3 worldPos = new Vector3(
+            boardStartX + (x * tileSpacing), 
+            boardStartY + (y * tileSpacing), 
             0
         );
+        
+        // Log conversion for debugging
+        Debug.Log($"Board.GetWorldPosition: Grid {gridPosition} -> World {worldPos}");
+        
+        return worldPos;
     }
 }
